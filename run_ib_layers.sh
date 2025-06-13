@@ -21,7 +21,7 @@ do
         python main.py --seed $seed --num_users 10 --iid 1 --ib_costum $ib_beta --ib_beta $ib_beta --ib_model_layer $layer \
             --dataset $dataset --model_name $model_name --epochs 300 --local_ep $local_epoch \
             --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
-            --lr_up cosine --MIA_mode 1  --gpu 1
+            --lr_up cosine --MIA_mode 1  --gpu 0
     done
 done
 # non-iid experiment
