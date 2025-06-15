@@ -21,7 +21,11 @@ do
         --dataset $dataset --model_name $model_name --epochs 300 --local_ep $local_epoch \
         --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
         --lr_up cosine --MIA_mode 1  --gpu 0
+
+    exec ./upload_to_onedrive.sh ./log_fedmia exp/
 done
+
+
 # non-iid experiment
 # save_dir=log_fedmia/noniid
 # CUDA_VISIBLE_DEVICES=0
