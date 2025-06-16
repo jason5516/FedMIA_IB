@@ -22,7 +22,7 @@ do
         --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
         --lr_up cosine --MIA_mode 1  --gpu 0
     
-    exec ./upload_to_onedrive.sh ./log_fedmia exp/
+    ./upload_to_onedrive.sh ./log_fedmia exp/
 done
 
 
