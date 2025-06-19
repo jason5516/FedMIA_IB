@@ -11,10 +11,10 @@ ib_beta=1e-6
 
 # non-iid experiment
 save_dir=log_fedmia/noniid_ib/noniid
-CUDA_VISIBLE_DEVICES=0
+# CUDA_VISIBLE_DEVICES=0
 
 
-for n_class in 2 4 6 8 10
+for n_class in 2 4 6
 do
     echo "Running with n_class $n_class, IB beta $ib_beta"
     python main.py --seed $seed --num_users 10 --iid 2 --n_classes $n_class --beta $bt --ib_costum $ib_beta --ib_beta $ib_beta \
