@@ -46,6 +46,51 @@ def cifar_iid_MIA(dataset, num_users):
         val_idxs.append(list(set(all_idx0)-dict_users[i]))
     return dict_users, train_idxs, val_idxs
 
+def cifar_class_num(dataset, n_class, num_users, num_classes=10):
+    # reproducibility
+        # 全量索引
+    all_idx0 = np.arange(len(dataset))
+    all_idxs = all_idx0.copy().tolist()
+    dict_users = {}
+    train_idxs = []
+    val_idxs = []
+    
+    # I.I.D. 分配
+    num_items = len(dataset) // num_users
+    for i in range(num_users):
+        chosen = np.random.choice(all_idxs, num_items, replace=False)
+        dict_users[i] = set(chosen)
+        train_idxs.append(list(chosen))
+        all_idxs = list(set(all_idxs) - dict_users[i])
+        val_idxs.append(list(set(all_idx0) - dict_users[i]))
+    
+    # 只保留 user 0 的 n_class 類別
+    labels = np.array(dataset.dataset.targets).astype(np.int32)
+    selected_classes = np.random.choice(np.arange(num_classes), size=n_class, replace=False)
+    user0_idx = np.array(list(dict_users[0]))
+    mask = np.isin(labels[user0_idx], selected_classes)
+    filtered0 = user0_idx[mask]
+    dict_users[0] = set(filtered0.tolist())
+    train_idxs[0] = filtered0.tolist()
+    val_idxs[0] = list(set(all_idx0) - dict_users[0])
+    
+    # 計算每個 client 在各 class 的大小
+    client_size_map = {i: {} for i in range(num_users)}
+    for i in range(num_users):
+        idxs = np.array(list(dict_users[i]))
+        if idxs.size == 0:
+            # 沒有資料就全部歸零
+            for c in range(num_classes):
+                client_size_map[i][c] = 0
+        else:
+            # 計算各類別出現次數
+            classes, counts = np.unique(labels[idxs], return_counts=True)
+            # 初始化為 0，再填入非零類別
+            for c in range(num_classes):
+                client_size_map[i][c] = int(counts[classes.tolist().index(c)]) if c in classes else 0
+
+    return dict_users, train_idxs, val_idxs, client_size_map
+
 
 def cifar_beta(dataset, beta, n_clients):  
      #beta = 0.1, n_clients = 10

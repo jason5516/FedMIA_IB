@@ -22,7 +22,7 @@ def setup_seed(seed):
      torch.backends.cudnn.deterministic = True
 
 
-def get_data(dataset, data_root, iid, num_users,data_aug, noniid_beta, save_path):
+def get_data(dataset, data_root, iid, num_users,data_aug, noniid_beta, save_path, n_class=10):
     ds = dataset 
     
     if ds == 'cifar10':
@@ -179,8 +179,17 @@ def get_data(dataset, data_root, iid, num_users,data_aug, noniid_beta, save_path
         train_set=torch.utils.data.TensorDataset(total_set[0][0:20000],total_set[1][0:20000] )
         test_set=torch.utils.data.TensorDataset(total_set[0][-2000:],total_set[1][-2000:] )
 
-    if iid:
+    if iid == 1:
         dict_users, train_idxs, val_idxs = cifar_iid_MIA(train_set, num_users)
+    elif iid == 2 and ds == "cifar10":
+        dict_users, train_idxs, val_idxs, client_size_map = cifar_class_num(train_set, n_class, num_users)
+        client_label_distribution = {
+            client_id: {int(class_id): int(count) for class_id, count in class_map.items()}
+            for client_id, class_map in client_size_map.items()
+        }
+        
+        with open(save_path + '/client_distribution.json', 'w') as f:
+            json.dump(client_label_distribution, f, indent=4)
     else:
         dict_users, train_idxs, val_idxs, client_size_map = cifar_beta(train_set, noniid_beta, num_users)
 
