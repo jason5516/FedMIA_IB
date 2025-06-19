@@ -11,10 +11,10 @@ ib_beta=1e-6
 
 # non-iid experiment
 save_dir=log_fedmia/noniid_ib/noniid
-# CUDA_VISIBLE_DEVICES=0
+CUDA_VISIBLE_DEVICES=1
 
 
-for n_class in 8 10
+for n_class in 4
 do
     echo "Running with n_class $n_class, IB beta $ib_beta"
     python main.py --seed $seed --num_users 5 --iid 2 --n_classes $n_class --beta $bt --ib_costum $ib_beta --ib_beta $ib_beta \
@@ -22,7 +22,7 @@ do
     --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
     --lr_up cosine --MIA_mode 1  --gpu 1
 
-    ./upload_to_onedrive.sh ./log_fedmia exp/
-    rm -r ./log_fedmia
+    # ./upload_to_onedrive.sh ./log_fedmia exp/
+    # rm -r ./log_fedmia
 done
 

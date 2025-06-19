@@ -46,62 +46,92 @@ def cifar_iid_MIA(dataset, num_users):
         val_idxs.append(list(set(all_idx0)-dict_users[i]))
     return dict_users, train_idxs, val_idxs
 
-def cifar_all_class_num(dataset, classes_per_client, num_users, val_ratio=0.2, random_seed=42):
-    # Set seed for reproducibility
+def cifar_all_class_num(
+    dataset,
+    classes_per_client,
+    num_users,
+    val_size=5000,
+    random_seed=42
+):
     np.random.seed(random_seed)
+    total_samples = len(dataset.dataset)
+    # 每个 client 的目标样本总数
+    samples_per_client = total_samples // num_users // 5
 
-    # Extract labels and number of classes
+    # 所有标签 & 类别数
     labels = np.array(dataset.dataset.targets).astype(np.int32)
     num_classes = len(np.unique(labels))
 
-    # Generate a shuffled ordering of all class labels
+    # 打乱类别顺序，round-robin 分配 classes_per_client 类给每个 client
     class_order = np.arange(num_classes)
     np.random.shuffle(class_order)
-
-    # Assign classes to each client in a round-robin fashion
     client_classes = {}
     for i in range(num_users):
         start = (i * classes_per_client) % num_classes
-        selected = class_order[start:start + classes_per_client].tolist()
-        # Wrap around if needed
-        if len(selected) < classes_per_client:
-            need = classes_per_client - len(selected)
-            selected += class_order[:need].tolist()
-        client_classes[i] = selected
+        cls = class_order[start:start + classes_per_client].tolist()
+        if len(cls) < classes_per_client:
+            cls += class_order[:(classes_per_client - len(cls))].tolist()
+        client_classes[i] = cls
 
-    # Precompute indices for each class
-    class_indices = {c: np.where(labels == c)[0].tolist() for c in range(num_classes)}
+    # 每个类的所有索引
+    class_indices = {c: np.where(labels == c)[0].tolist()
+                     for c in range(num_classes)}
 
     client_datasets = []
     train_idxs = []
     val_idxs = []
     client_size_map = {}
 
-    # Build dataset splits and size maps for each client
     for client_id, classes in client_classes.items():
-        # Gather all indices for the client's classes
+        base = samples_per_client // classes_per_client
+        rem  = samples_per_client % classes_per_client
+
         idxs = []
-        for c in classes:
-            idxs.extend(class_indices[c])
+        counts = {}
+        for j, c in enumerate(classes):
+            need = base + (1 if j < rem else 0)
+            pool = class_indices[c]
+            replace = len(pool) < need
+            chosen = np.random.choice(pool, size=need, replace=replace).tolist()
+            idxs.extend(chosen)
+            counts[c] = need
+
         np.random.shuffle(idxs)
-
-        # Split into train/validation
-        split = int(len(idxs) * (1 - val_ratio))
-        train = idxs[:split]
-        val = idxs[split:]
-
-        # Record splits
-        train_idxs.append(train)
-        val_idxs.append(val)
-
-        # Count samples per class for this client
-        counts = {c: int((labels[idxs] == c).sum()) for c in range(num_classes)}
+        train_idxs.append(idxs)
         client_size_map[client_id] = counts
-
-        # Create Subset for client
         client_datasets.append(Subset(dataset.dataset, idxs))
+    
+    all_train = set(sum(train_idxs, []))
+    remaining = list(set(range(total_samples)) - all_train)
+    np.random.shuffle(remaining)
 
-    return client_datasets, train_idxs, val_idxs, client_size_map
+    # 3) 从剩余中分层抽样做共享验证集
+    base_val = val_size // num_classes
+    rem_val  = val_size % num_classes
+
+    # 剩余类别索引
+    rem_by_class = {c: [] for c in range(num_classes)}
+    for idx in remaining:
+        rem_by_class[labels[idx]].append(idx)
+
+    val_idxs = []
+    val_size_map = {}
+    for c in range(num_classes):
+        need = base_val + (1 if c < rem_val else 0)
+        pool = rem_by_class[c]
+        replace = len(pool) < need
+        chosen = np.random.choice(pool, size=need, replace=replace).tolist()
+        val_idxs.extend(chosen)
+        val_size_map[c] = need
+
+    np.random.shuffle(val_idxs)
+
+    client_val_idxs = []
+    for c in range(num_users):
+        client_val_idxs.append(val_idxs)
+
+
+    return client_datasets, train_idxs, client_val_idxs, client_size_map
 
 def cifar_class_num(dataset, n_class, num_users, num_classes=10):
     # reproducibility
