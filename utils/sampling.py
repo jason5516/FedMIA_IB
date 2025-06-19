@@ -56,7 +56,7 @@ def cifar_all_class_num(
     np.random.seed(random_seed)
     total_samples = len(dataset.dataset)
     # 每个 client 的目标样本总数
-    samples_per_client = total_samples // num_users // 5
+    samples_per_client = total_samples // num_users // 2
 
     # 所有标签 & 类别数
     labels = np.array(dataset.dataset.targets).astype(np.int32)
