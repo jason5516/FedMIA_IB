@@ -636,9 +636,9 @@ if __name__ == '__main__':
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
     setup_seed(args.seed)
     if "IB" in args.model_name:
-        if args.model_name == "ResNet18_IB_layer" and args.iid in [0,1]:
+        if args.model_name == "ResNet18_IB_layer":
             args.save_dir=args.save_dir+'/'+f"{args.dataset}_K{args.num_users}_N{args.samples_per_user}_{args.model_name}_iblayer{args.ib_model_layer}_beta{args.ib_beta}_def{args.defense}_iid${args.iid}_${args.beta}_${args.optim}_local{args.local_ep}_s{args.seed}"
-        elif args.model_name == "ResNet18_IB_layer" and args.iid == 2:
+        elif args.iid == 2:
             args.save_dir=args.save_dir+'/'+f"{args.dataset}_K{args.num_users}_N{args.samples_per_user}_{args.model_name}_iblayer{args.ib_model_layer}_beta{args.ib_beta}_def{args.defense}_iid${args.iid}_nclass${args.n_classes}_${args.beta}_${args.optim}_local{args.local_ep}_s{args.seed}"
         else:
             args.save_dir=args.save_dir+'/'+f"{args.dataset}_K{args.num_users}_N{args.samples_per_user}_{args.model_name}_beta{args.ib_beta}_def{args.defense}_iid${args.iid}_${args.beta}_${args.optim}_local{args.local_ep}_s{args.seed}"
