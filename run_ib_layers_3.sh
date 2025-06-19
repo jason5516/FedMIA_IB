@@ -23,6 +23,7 @@ do
         --lr_up cosine --MIA_mode 1  --gpu 0
 
     ./upload_to_onedrive.sh ./log_fedmia exp/
+    rm -r ./log_fedmia
 done
 
 
