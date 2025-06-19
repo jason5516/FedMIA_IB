@@ -131,7 +131,7 @@ class FederatedLearning(Experiment):
         test_ldr = DataLoader(self.test_set, batch_size=self.batch_size , shuffle=False, num_workers=2)
 
         local_train_ldrs = []
-        if args.iid:
+        if args.iid == 1:
             for i in range(self.num_users):
                 if args.defense=='instahide':
                     self.batch_size=len(self.dict_users[i])

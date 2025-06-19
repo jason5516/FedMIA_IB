@@ -182,7 +182,7 @@ def get_data(dataset, data_root, iid, num_users,data_aug, noniid_beta, save_path
     if iid == 1:
         dict_users, train_idxs, val_idxs = cifar_iid_MIA(train_set, num_users)
     elif iid == 2 and ds == "cifar10":
-        dict_users, train_idxs, val_idxs, client_size_map = cifar_class_num(train_set, n_class, num_users)
+        dict_users, train_idxs, val_idxs, client_size_map = cifar_all_class_num(train_set, n_class, num_users)
         client_label_distribution = {
             client_id: {int(class_id): int(count) for class_id, count in class_map.items()}
             for client_id, class_map in client_size_map.items()

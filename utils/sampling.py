@@ -46,6 +46,63 @@ def cifar_iid_MIA(dataset, num_users):
         val_idxs.append(list(set(all_idx0)-dict_users[i]))
     return dict_users, train_idxs, val_idxs
 
+def cifar_all_class_num(dataset, classes_per_client, num_users, val_ratio=0.2, random_seed=42):
+    # Set seed for reproducibility
+    np.random.seed(random_seed)
+
+    # Extract labels and number of classes
+    labels = np.array(dataset.dataset.targets).astype(np.int32)
+    num_classes = len(np.unique(labels))
+
+    # Generate a shuffled ordering of all class labels
+    class_order = np.arange(num_classes)
+    np.random.shuffle(class_order)
+
+    # Assign classes to each client in a round-robin fashion
+    client_classes = {}
+    for i in range(num_users):
+        start = (i * classes_per_client) % num_classes
+        selected = class_order[start:start + classes_per_client].tolist()
+        # Wrap around if needed
+        if len(selected) < classes_per_client:
+            need = classes_per_client - len(selected)
+            selected += class_order[:need].tolist()
+        client_classes[i] = selected
+
+    # Precompute indices for each class
+    class_indices = {c: np.where(labels == c)[0].tolist() for c in range(num_classes)}
+
+    client_datasets = []
+    train_idxs = []
+    val_idxs = []
+    client_size_map = {}
+
+    # Build dataset splits and size maps for each client
+    for client_id, classes in client_classes.items():
+        # Gather all indices for the client's classes
+        idxs = []
+        for c in classes:
+            idxs.extend(class_indices[c])
+        np.random.shuffle(idxs)
+
+        # Split into train/validation
+        split = int(len(idxs) * (1 - val_ratio))
+        train = idxs[:split]
+        val = idxs[split:]
+
+        # Record splits
+        train_idxs.append(train)
+        val_idxs.append(val)
+
+        # Count samples per class for this client
+        counts = {c: int((labels[idxs] == c).sum()) for c in range(num_classes)}
+        client_size_map[client_id] = counts
+
+        # Create Subset for client
+        client_datasets.append(Subset(dataset.dataset, idxs))
+
+    return client_datasets, train_idxs, val_idxs, client_size_map
+
 def cifar_class_num(dataset, n_class, num_users, num_classes=10):
     # reproducibility
         # 全量索引
