@@ -17,7 +17,7 @@ save_dir=log_fedmia/noniid_ib/noniid
 for n_class in 8 10
 do
     echo "Running with n_class $n_class, IB beta $ib_beta"
-    python main.py --seed $seed --num_users 10 --iid 2 --n_classes $n_class --beta $bt --ib_costum $ib_beta --ib_beta $ib_beta \
+    python main.py --seed $seed --num_users 5 --iid 2 --n_classes $n_class --beta $bt --ib_costum $ib_beta --ib_beta $ib_beta \
     --dataset $dataset --model_name $model_name --epochs 100 --local_ep $local_epoch \
     --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
     --lr_up cosine --MIA_mode 1  --gpu 1
@@ -25,3 +25,4 @@ do
     ./upload_to_onedrive.sh ./log_fedmia exp/
     rm -r ./log_fedmia
 done
+
