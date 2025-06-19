@@ -23,6 +23,11 @@ from experiments.trainer_private import TrainerPrivate, TesterPrivate
 from experiments.utils import quant
 from mia_attack import lira_attack_ldh_cosine, cos_attack
 
+# 啟用 TF32 加速 tensor matmul 運算
+torch.backends.cuda.matmul.allow_tf32 = True
+
+# 啟用 TF32 加速 CNN 的 convolution 層
+torch.backends.cudnn.allow_tf32 = True
 
 class FederatedLearning(Experiment):
     """
