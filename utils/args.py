@@ -78,6 +78,8 @@ def parser_args():
     parser.add_argument('--ib_costum', type=float, nargs='*', help='A list of beta')
     
     parser.add_argument('--dataset', type=str, default='cifar100', help="name of dataset")
+
+    parser.add_argument("--n_classes", type=int, default=10, help="if iid=2 control target client own's class number")
     
     parser.add_argument('--data_root', default='../Data',
                         help='dataset directory')

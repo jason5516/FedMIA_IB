@@ -67,7 +67,8 @@ class FederatedLearning(Experiment):
                                                         num_users = self.num_users,
                                                         data_aug=self.args.data_augment,
                                                         noniid_beta=self.args.beta,
-                                                        save_path = args.save_dir
+                                                        save_path = args.save_dir,
+                                                        n_class=args.n_classes
                                                         )
 
         print(len(self.train_set), len(self.test_set))
