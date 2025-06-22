@@ -8,13 +8,13 @@ lr=1e-3
 local_epoch=1
 bt=0.1
 ib_beta=1e-6
-n_class=4
+n_class=10
 # non-iid experiment
 save_dir=log_fedmia/noniid_ib/noniid
 CUDA_VISIBLE_DEVICES=1
 
 
-for ib_beta in 1e-5 1e-4 1e-7 1e-8
+for ib_beta in 1e-6
 do
     echo "Running with n_class $n_class, IB beta $ib_beta"
     python main.py --seed $seed --num_users 5 --iid 2 --n_classes $n_class --beta $bt --ib_costum $ib_beta --ib_beta $ib_beta \
