@@ -1,7 +1,7 @@
 # federated training and attack measurement calculatinging command 
 dataset=cifar100 # or [cifar100, dermnet, cifar10]
 model_name=ResNet18_IB_layer # or [ResNet18, ResNet18_IB, ResNet18_IB_Block, ResNet18_IB_layer, alexnet]
-layer=2
+layer=3
 
 opt=sgd
 seed=1 
@@ -15,7 +15,7 @@ local_epoch=1
 save_dir=log_fedmia/iid_ib
 CUDA_VISIBLE_DEVICES=1
 
-for ib_beta in 1e-6
+for ib_beta in 1e-7
 do
     python main.py --seed $seed --num_users 10 --iid 1 --ib_costum $ib_beta --ib_beta $ib_beta --ib_model_layer $layer \
         --dataset $dataset --model_name $model_name --epochs 300 --local_ep $local_epoch \

@@ -15,7 +15,7 @@ local_epoch=1
 save_dir=log_fedmia/iid_ib
 CUDA_VISIBLE_DEVICES=0
 
-for ib_beta in 1e-5
+for ib_beta in 1e-4
 do
     python main.py --seed $seed --num_users 10 --iid 1 --ib_costum $ib_beta --ib_beta $ib_beta --ib_model_layer $layer \
         --dataset $dataset --model_name $model_name --epochs 300 --local_ep $local_epoch \
