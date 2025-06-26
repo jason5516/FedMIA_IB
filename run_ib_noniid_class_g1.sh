@@ -12,6 +12,7 @@ n_class=10
 # non-iid experiment
 save_dir=log_fedmia/noniid_ib/noniid
 CUDA_VISIBLE_DEVICES=1
+dynamic_ib=entropy
 
 
 for n_class in 6
