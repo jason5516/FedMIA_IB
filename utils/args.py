@@ -69,6 +69,8 @@ def parser_args():
     parser.add_argument('--model_name', type=str, default='alexnet', choices=['alexnet','ResNet18','ResNet18_IB', "ResNet18_IB_Block", "ResNet18_IB_layer"],
                         help='model architecture name')
     
+    parser.add_argument("--dynamic_ib", type=str, default=None, choices=['entropy', 'ir', None], help="if use dynemic to choose beta")
+
     parser.add_argument("--ib_model_layer", type=int, default=0, help="if model is ResNet18_IB_layer, select which layer to add IB")
     
     parser.add_argument('--ib', type=bool, default=False, help='model architecture use ib or not')

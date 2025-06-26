@@ -23,12 +23,6 @@ from experiments.trainer_private import TrainerPrivate, TesterPrivate
 from experiments.utils import quant
 from mia_attack import lira_attack_ldh_cosine, cos_attack
 
-# 啟用 TF32 加速 tensor matmul 運算
-torch.backends.cuda.matmul.allow_tf32 = True
-
-# 啟用 TF32 加速 CNN 的 convolution 層
-torch.backends.cudnn.allow_tf32 = True
-
 class FederatedLearning(Experiment):
     """
     Perform federated learning
@@ -66,7 +60,7 @@ class FederatedLearning(Experiment):
         self.data_root = args.data_root
  
         print('==> Preparing data...')
-        self.train_set, self.test_set, self.train_set_mia, self.test_set_mia, self.dict_users, self.train_idxs, self.val_idxs = get_data(dataset=self.dataset,
+        self.train_set, self.test_set, self.train_set_mia, self.test_set_mia, self.dict_users, self.train_idxs, self.val_idxs, self.disturibute = get_data(dataset=self.dataset,
                                                         data_root = self.data_root,
                                                         iid = self.iid,
                                                         num_users = self.num_users,
@@ -114,8 +108,41 @@ class FederatedLearning(Experiment):
 
         if "IB" in self.args.model_name:
             self.trainer.ib = True
+        
+    def compute_C1(self, class_counts):
+        class_counts = [c for c in class_counts if c > 0]
+        total = sum(class_counts)
+        if total == 0 or len(class_counts) <= 1:
+            return 1.0
+        probs = [c / total for c in class_counts]
+        entropy = -sum([p * np.log(p) for p in probs])
+        norm_entropy = entropy / np.log(10)
+        
+        return 1 - norm_entropy
 
-              
+    def compute_C2(self, class_counts):
+        class_counts = [c for c in class_counts]
+        n_c = len(class_counts)
+        n = sum(class_counts)
+        if n_c <= 1 or n == 0:
+            return 1.0
+        ir = 0
+        for c_i in class_counts:
+            if n - c_i == 0:
+                continue
+            ir += c_i / (n - c_i)
+        ir *= (n_c - 1) / n_c
+        if ir <= 1:
+            return 0.0
+        return 1 - 1 / ir
+    
+    def get_dynemic_beta(self, c_score):
+        ib_max = 1e-3
+        ib_min = 1e-5
+        scale = ib_max - ib_min
+
+        return [ib_min + (scale * i) for i in c_score] 
+
     def construct_model(self):
 
         if self.args.model_name == "ResNet18_IB_layer":
@@ -123,6 +150,25 @@ class FederatedLearning(Experiment):
         else:
             model = models.__dict__[self.args.model_name](num_classes=self.num_classes)
 
+        
+        if self.args.dynamic_ib and self.iid in [0,2]:
+            c_score = []
+            if self.args.dynamic_ib == "entropy":
+                for client_id, class_dist in self.disturibute.items():
+                    counts = list(class_dist.values())
+                    c1_score = self.compute_C1(counts)
+                    c_score.append(c1_score) 
+
+            elif self.args.dynamic_ib == "ir":
+                for client_id, class_dist in self.disturibute.items():
+                    counts = list(class_dist.values())
+                    c2_score = self.compute_C2(self.disturibute)
+                    c_score.append(c2_score) 
+                
+            
+            # 計算costum的IB值
+            self.user_ib = self.get_dynemic_beta(c_score)
+        
         #model = torch.nn.DataParallel(model)
         self.model = model.to(self.device)
         
@@ -644,9 +690,9 @@ if __name__ == '__main__':
         if args.model_name == "ResNet18_IB_layer":
             args.save_dir=args.save_dir+'/'+f"{args.dataset}_K{args.num_users}_N{args.samples_per_user}_{args.model_name}_iblayer{args.ib_model_layer}_beta{args.ib_beta}_def{args.defense}_iid${args.iid}_${args.beta}_${args.optim}_local{args.local_ep}_s{args.seed}"
         elif args.iid == 2:
-            args.save_dir=args.save_dir+'/'+f"{args.dataset}_K{args.num_users}_N{args.samples_per_user}_{args.model_name}_iblayer{args.ib_model_layer}_beta{args.ib_beta}_def{args.defense}_iid${args.iid}_nclass${args.n_classes}_${args.beta}_${args.optim}_local{args.local_ep}_s{args.seed}"
+            args.save_dir=args.save_dir+'/'+f"{args.dataset}_K{args.num_users}_N{args.samples_per_user}_{args.model_name}_iblayer{args.ib_model_layer}_beta{args.ib_beta}_dynamic{args.dynamic_ib}_def{args.defense}_iid${args.iid}_nclass${args.n_classes}_${args.beta}_${args.optim}_local{args.local_ep}_s{args.seed}"
         else:
-            args.save_dir=args.save_dir+'/'+f"{args.dataset}_K{args.num_users}_N{args.samples_per_user}_{args.model_name}_beta{args.ib_beta}_def{args.defense}_iid${args.iid}_${args.beta}_${args.optim}_local{args.local_ep}_s{args.seed}"
+            args.save_dir=args.save_dir+'/'+f"{args.dataset}_K{args.num_users}_N{args.samples_per_user}_{args.model_name}_beta{args.ib_beta}_dynamic{args.dynamic_ib}_def{args.defense}_iid${args.iid}_${args.beta}_${args.optim}_local{args.local_ep}_s{args.seed}"
     else:
         args.save_dir=args.save_dir+'/'+f"{args.dataset}_K{args.num_users}_N{args.samples_per_user}_{args.model_name}_def{args.defense}_iid${args.iid}_${args.beta}_${args.optim}_local{args.local_ep}_s{args.seed}"
     print("scores saved in:",os.path.join(os.getcwd(), args.save_dir))

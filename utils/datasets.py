@@ -201,7 +201,7 @@ def get_data(dataset, data_root, iid, num_users,data_aug, noniid_beta, save_path
         with open(save_path + '/client_distribution.json', 'w') as f:
             json.dump(client_label_distribution, f, indent=4)
 
-    return train_set, test_set, train_set_mia, test_set_mia, dict_users, train_idxs, val_idxs
+    return train_set, test_set, train_set_mia, test_set_mia, dict_users, train_idxs, val_idxs, client_label_distribution
 
 class DatasetSplit(Dataset):
     def __init__(self, dataset, idxs):

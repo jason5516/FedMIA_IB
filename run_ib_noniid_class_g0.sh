@@ -7,17 +7,18 @@ seed=1
 lr=1e-3
 local_epoch=1
 bt=0.1
-ib_beta=1e-6
-n_class=10
+ib_beta=1e-3
+n_class=4
 # non-iid experiment
 save_dir=log_fedmia/noniid_ib/noniid
 CUDA_VISIBLE_DEVICES=0
+dynamic_ib=entropy
 
 
-for ib_beta in 1e-5 1e-4 1e-7 1e-8
+for n_class in 8
 do
-    echo "Running with n_class $n_class, IB beta $ib_beta"
-    python main.py --seed $seed --num_users 5 --iid 2 --n_classes $n_class --beta $bt --ib_costum $ib_beta --ib_beta $ib_beta \
+    echo "Running with n_class $n_class, IB beta dynamic $dynamic_ib"
+    python main.py --seed $seed --num_users 5 --iid 2 --n_classes $n_class --beta $bt --ib_costum $ib_beta --ib_beta $ib_beta --dynamic_ib $dynamic_ib\
     --dataset $dataset --model_name $model_name --epochs 100 --local_ep $local_epoch \
     --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
     --lr_up cosine --MIA_mode 1  --gpu 0
@@ -25,3 +26,5 @@ do
     # ./upload_to_onedrive.sh ./log_fedmia exp/
     # rm -r ./log_fedmia
 done
+
+# -m debugpy --listen 5010 --wait-for-client
