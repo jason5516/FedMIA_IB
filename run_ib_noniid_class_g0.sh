@@ -7,7 +7,7 @@ seed=1
 lr=1e-3
 local_epoch=1
 bt=0.1
-ib_beta=1e-3
+ib_beta=1e-6
 n_class=4
 # non-iid experiment
 save_dir=log_fedmia/noniid_ib/noniid
