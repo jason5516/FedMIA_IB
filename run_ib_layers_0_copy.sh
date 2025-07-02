@@ -7,7 +7,8 @@ opt=sgd
 seed=1 
 lr=0.001
 local_epoch=1
-dynamic_ib=ir
+dynamic_ib=entropy
+
 
 # ib_beta=0.00001
 
@@ -16,12 +17,12 @@ dynamic_ib=ir
 # save_dir=log_fedmia/iid_ib
 # CUDA_VISIBLE_DEVICES=1
 
-# for ib_beta in 1e-2 1e-3 1e-4 
+# for ib_beta in 1e-5 1e-6 1e-7 1e-8
 # do
 #     python main.py --seed $seed --num_users 10 --iid 1 --ib_costum $ib_beta --ib_beta $ib_beta --ib_model_layer $layer \
 #         --dataset $dataset --model_name $model_name --epochs 300 --local_ep $local_epoch \
 #         --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
-#         --lr_up cosine --MIA_mode 1  --gpu 0
+#         --lr_up cosine --MIA_mode 1  --gpu 1
 
 #     ./upload_to_onedrive.sh ./log_fedmia exp/
 # done
@@ -38,8 +39,8 @@ do
     python  main.py --seed $seed --num_users 10 --iid 0 --beta $bt --ib_costum $ib_beta --ib_beta $ib_beta --ib_model_layer $layer --dynamic_ib $dynamic_ib\
     --dataset $dataset --model_name $model_name --epochs 300 --local_ep $local_epoch \
     --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
-    --lr_up cosine --MIA_mode 1  --gpu 0
-
+    --lr_up cosine --MIA_mode 1  --gpu 1
+    
     ./upload_to_onedrive.sh ./log_fedmia exp/
 done
 

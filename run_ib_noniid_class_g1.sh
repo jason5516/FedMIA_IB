@@ -15,7 +15,7 @@ CUDA_VISIBLE_DEVICES=1
 dynamic_ib=entropy
 
 
-for n_class in 6
+for n_class in 4
 do
     echo "Running with n_class $n_class, IB beta $ib_beta"
     python main.py --seed $seed --num_users 5 --iid 2 --n_classes $n_class --beta $bt --ib_costum $ib_beta --ib_beta $ib_beta --dynamic_ib $dynamic_ib\
