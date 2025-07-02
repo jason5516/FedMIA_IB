@@ -52,10 +52,6 @@ class FederatedLearning(Experiment):
         self.save_dir = args.save_dir
         if not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
-
-        if "IB" in args.model_name:
-            with open(self.save_dir + '/client_custum_beta.json', 'w') as f:
-                json.dump(self.user_ib, f, indent=4)
         
         self.data_root = args.data_root
  
@@ -100,6 +96,10 @@ class FederatedLearning(Experiment):
                      }
 
         self.construct_model()
+
+        if "IB" in args.model_name:
+            with open(self.save_dir + '/client_custum_beta.json', 'w') as f:
+                json.dump(self.user_ib, f, indent=4)
         
         self.w_t = copy.deepcopy(self.model.state_dict())
 
@@ -116,7 +116,7 @@ class FederatedLearning(Experiment):
             return 1.0
         probs = [c / total for c in class_counts]
         entropy = -sum([p * np.log(p) for p in probs])
-        norm_entropy = entropy / np.log(10)
+        norm_entropy = entropy / np.log(self.num_classes)
         
         return 1 - norm_entropy
 
@@ -688,7 +688,7 @@ if __name__ == '__main__':
     setup_seed(args.seed)
     if "IB" in args.model_name:
         if args.model_name == "ResNet18_IB_layer":
-            args.save_dir=args.save_dir+'/'+f"{args.dataset}_K{args.num_users}_N{args.samples_per_user}_{args.model_name}_iblayer{args.ib_model_layer}_beta{args.ib_beta}_def{args.defense}_iid${args.iid}_${args.beta}_${args.optim}_local{args.local_ep}_s{args.seed}"
+            args.save_dir=args.save_dir+'/'+f"{args.dataset}_K{args.num_users}_N{args.samples_per_user}_{args.model_name}_iblayer{args.ib_model_layer}_beta{args.ib_beta}_dynamic{args.dynamic_ib}_def{args.defense}_iid${args.iid}_${args.beta}_${args.optim}_local{args.local_ep}_s{args.seed}"
         elif args.iid == 2:
             args.save_dir=args.save_dir+'/'+f"{args.dataset}_K{args.num_users}_N{args.samples_per_user}_{args.model_name}_iblayer{args.ib_model_layer}_beta{args.ib_beta}_dynamic{args.dynamic_ib}_def{args.defense}_iid${args.iid}_nclass${args.n_classes}_${args.beta}_${args.optim}_local{args.local_ep}_s{args.seed}"
         else:
