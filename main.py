@@ -402,6 +402,12 @@ class FederatedLearning(Experiment):
                 loss_train_mean, loss_train_kl_mean, loss_train_ce_mean, acc_train_mean = self.trainer.test(train_ldr)
                 loss_val_mean, loss_val_kl_mean, loss_val_kl_mean, acc_val_mean = self.trainer.test(val_ldr)
                 loss_test_mean, acc_test_mean = loss_val_mean, acc_val_mean
+                try:
+                    loss_train_mean = loss_train_mean.item()
+                    loss_val_mean = loss_val_mean.item()
+                except:
+                    loss_train_mean = loss_train_mean
+                    loss_val_mean = loss_val_mean
 
                 self.logs['train_acc'].append(acc_train_mean)
                 self.logs['train_loss'].append(loss_train_mean)
@@ -431,8 +437,8 @@ class FederatedLearning(Experiment):
                 s = 'epoch:{}, lr:{:.5f}, val_acc:{:.4f}, val_loss:{:.4f}, tarin_acc:{:.4f}, train_loss:{:.4f},time:{:.4f}, total_time:{:.4f}'.format(epoch,self.lr,acc_val_mean,loss_val_mean,acc_train_mean,loss_train_mean,interval_time,total_time)
                 
                 with open(fn,"a") as f:
-                    json.dump({"epoch":epoch,"lr":round(self.lr,5),"train_acc":round(acc_train_mean,4  ),"train loss":round(loss_train_mean.item(),4),"train ce loss":round(loss_train_ce_mean,4),"train kl loss":round(loss_train_kl_mean,4),
-                               "test_acc":round(acc_val_mean,4),"test_loss":round(loss_val_mean.item(),4),"time":round(total_time,2)},f)
+                    json.dump({"epoch":epoch,"lr":round(self.lr,5),"train_acc":round(acc_train_mean,4  ),"train loss":round(loss_train_mean,4),"train ce loss":round(loss_train_ce_mean,4),"train kl loss":round(loss_train_kl_mean,4),
+                               "test_acc":round(acc_val_mean,4),"test_loss":round(loss_val_mean,4),"time":round(total_time,2)},f)
                     f.write('\n')
 
         print('------------------------------------------------------------------------')
@@ -694,7 +700,10 @@ if __name__ == '__main__':
         else:
             args.save_dir=args.save_dir+'/'+f"{args.dataset}_K{args.num_users}_N{args.samples_per_user}_{args.model_name}_beta{args.ib_beta}_dynamic{args.dynamic_ib}_def{args.defense}_iid${args.iid}_${args.beta}_${args.optim}_local{args.local_ep}_s{args.seed}"
     else:
-        args.save_dir=args.save_dir+'/'+f"{args.dataset}_K{args.num_users}_N{args.samples_per_user}_{args.model_name}_def{args.defense}_iid${args.iid}_${args.beta}_${args.optim}_local{args.local_ep}_s{args.seed}"
+        if args.dp:
+            args.save_dir=args.save_dir+'/'+f"{args.dataset}_K{args.num_users}_N{args.samples_per_user}_{args.model_name}_defDP_iid${args.iid}_${args.beta}_${args.optim}_local{args.local_ep}_s{args.seed}"
+        else:
+            args.save_dir=args.save_dir+'/'+f"{args.dataset}_K{args.num_users}_N{args.samples_per_user}_{args.model_name}_def{args.defense}_iid${args.iid}_${args.beta}_${args.optim}_local{args.local_ep}_s{args.seed}"
     print("scores saved in:",os.path.join(os.getcwd(), args.save_dir))
     args.log_folder_name=args.save_dir
     main(args)
