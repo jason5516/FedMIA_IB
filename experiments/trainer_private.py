@@ -10,7 +10,7 @@ import torch.optim as optim
 from torch.autograd import Variable
 import numpy as np
 
-# from opacus import PrivacyEngine
+from opacus import PrivacyEngine
 # from models.losses.sign_loss import SignLoss
 from models.alexnet import AlexNet
 from experiments.utils import  chunks, vec_mul_ten, insta_criterion
@@ -110,7 +110,7 @@ class TesterPrivate(object):
         return avg_private
 
 class TrainerPrivate(object):
-    def __init__(self, model, train_set, device, dp, sigma,num_classes,defense=None,klam=3,up_bound=0.65,mix_alpha=0.01):
+    def __init__(self, model, train_set, device, dp, sigma,num_classes,defense=None,klam=3,up_bound=0.65,mix_alpha=0.01, grad_norm=1.0, sigma_sgd=1.0):
         self.model = model
         self.device = device
         self.tester = TesterPrivate(model, device)
@@ -120,6 +120,8 @@ class TrainerPrivate(object):
         self.klam=klam
         self.up_bound=up_bound
         self.mix_alpha=mix_alpha
+        self.grad_norm = grad_norm
+        self.sigma_sgd = sigma_sgd
         
         self.ib = None
         
@@ -157,6 +159,7 @@ class TrainerPrivate(object):
     
     def _local_update_noback(self, dataloader, local_ep, lr, optim_choice, sampling_proportion):
         
+        self.model.train()
         if optim_choice=="sgd":
         
             self.optimizer = optim.SGD(self.model.parameters(),
@@ -168,9 +171,20 @@ class TrainerPrivate(object):
                                 lr,
                                 weight_decay=0.0005)
                                   
+        if self.dp:
+            privacy_engine = PrivacyEngine()
+            self.model, self.optimizer, train_ldr = privacy_engine.make_private(
+                module=self.model,
+                optimizer=self.optimizer,
+                data_loader=dataloader,
+                noise_multiplier=self.sigma_sgd,
+                max_grad_norm=self.grad_norm,
+            )
+        else:
+            train_ldr = dataloader
+
         epoch_loss = []
         cos_scores=[]
-        train_ldr = dataloader 
 
         for epoch in range(local_ep):
             
@@ -290,14 +304,22 @@ class TrainerPrivate(object):
 
                 train_loss /= len(bl)
                 epoch_loss.append(train_loss)
-                        
+        
+        model_state_dict = self.model.state_dict()
         if self.dp:
-            # print('DP setting ......')
-            for param in self.model.parameters():
-                param.data = param.data + torch.normal(torch.zeros(param.size()), self.sigma).to(self.device)
-        
-        
-        return self.model.state_dict(), np.mean(epoch_loss)
+            from collections import OrderedDict
+            clean_state_dict = OrderedDict()
+            # When using opacus, the model is wrapped and parameter names are prefixed with '_module.'.
+            # We remove this prefix to ensure compatibility with the global model's state_dict.
+            for k, v in model_state_dict.items():
+                if k.startswith('_module.'):
+                    clean_key = k[8:] # remove '_module.'
+                else:
+                    clean_key = k
+                clean_state_dict[clean_key] = v
+            return clean_state_dict, np.mean(epoch_loss)
+
+        return model_state_dict, np.mean(epoch_loss)
     
     def test(self, dataloader):
 
@@ -366,5 +388,3 @@ class TrainerPrivate(object):
         acc_meter /= runcount
 
         return  loss_meter, acc_meter
-
- 

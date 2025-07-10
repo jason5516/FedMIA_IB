@@ -12,15 +12,15 @@ bt=1.0
 save_dir=log_fedmia/iid
 CUDA_VISIBLE_DEVICES=1
 
-python main.py --seed $seed --num_users 10 --iid 1 --defense none --dp\
-    --dataset $dataset --model_name $model_name --epochs 300 --local_ep $local_epoch \
-    --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
-    --lr_up cosine --MIA_mode 1  --gpu 1 
-
-# python main.py --seed $seed --num_users 10 --iid 1 --defense none --dp \
-#     --dataset $dataset --model_name $model_name --epochs 300 --local_ep $local_epoch \
+# python main.py --seed $seed --num_users 10 --iid 1 --defense p2protect\
+#     --dataset $dataset --model_name $model_name --epochs 100 --local_ep $local_epoch \
 #     --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
-#     --lr_up cosine --MIA_mode 1  --gpu 1 
+#     --lr_up cosine --MIA_mode 1  --gpu 1
+
+python main.py --seed $seed --num_users 10 --iid 1 --defense none --dp --sigma_sgd 0.5\
+    --dataset $dataset --model_name $model_name --epochs 100 --local_ep $local_epoch \
+    --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
+    --lr_up cosine --MIA_mode 1  --gpu 1
 
 # non-iid experiment
 # save_dir=log_fedmia/noniid

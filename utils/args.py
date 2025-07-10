@@ -23,6 +23,16 @@ def parser_args():
     parser.add_argument('--mix_alpha', type=float, default=0.01,
                         help="the param of beta distribution in mix up")
 
+    # ========================= P2Protect defense parameters =====================
+    parser.add_argument('--p2protect_eps', type=float, default=0.1,
+                        help="Epsilon for P2Protect defense")
+    parser.add_argument('--p2protect_retrain_epochs', type=int, default=5,
+                        help="Number of retraining epochs for P2Protect")
+    parser.add_argument('--p2protect_lr', type=float, default=0.001,
+                        help="Learning rate for P2Protect retraining")
+    parser.add_argument('--p2protect_batch_size', type=int, default=128,
+                        help="Batch size for P2Protect retraining")
+    
     parser.add_argument('--seed', type=int, default=42,
                         help="random seed")
     parser.add_argument('--frac', type=float, default=1,
@@ -96,14 +106,14 @@ def parser_args():
                         help='experiment id')
     parser.add_argument("--sigma_sgd",
         type=float,
-        default=0.0,
+        default=0.5,
         metavar="S",
         help="Noise multiplier",
     )
     parser.add_argument(
     "--grad_norm",
     type=float,
-    default=1e4,
+    default=1.0,
     help="Clip per-sample gradients to this norm",
     )
     # =========================== DP ===================================
