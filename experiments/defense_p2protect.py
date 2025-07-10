@@ -5,6 +5,7 @@ from torch import optim
 import torch.nn.functional as F
 import numpy as np
 import copy
+from tqdm import tqdm
 
 # --- Model Structure ---
 class Net(torch.nn.Module):
@@ -53,13 +54,19 @@ def _get_grad_direction(example_input, net, optimizer, y_ext_label):
     optimizer.zero_grad()
     loss.backward()
     
-    grad_arr = []
+    grad_vecs = []
     for param in net.parameters():
         if param.grad is not None:
-            grad_arr.append(param.grad.clone()) # Use clone to avoid issues
+            grad_vecs.append(param.grad.clone().flatten())
             
     net.zero_grad() # Clean up gradients
-    return grad_arr
+    
+    if not grad_vecs:
+        # This case should ideally not happen if the model has trainable parameters
+        # and the loss is connected to them.
+        return torch.tensor([], device=next(net.parameters()).device)
+
+    return torch.cat(grad_vecs)
 
 def _get_point_via_bisection(org_y, graddif_y, eps, seg_point_start, seg_point_end):
     """Finds the optimal interpolation point using bisection search."""
@@ -84,11 +91,12 @@ def _get_point_via_bisection(org_y, graddif_y, eps, seg_point_start, seg_point_e
 
 def _get_modified_y_list(org_y_list, max_graddif_y_list, eps):
     """Generates the list of modified target outputs."""
-    return [
-        (1 - seg_point) * org_y + seg_point * max_graddif_y
-        for org_y, max_graddif_y in zip(org_y_list, max_graddif_y_list)
-        for seg_point in [_get_point_via_bisection(org_y, max_graddif_y, eps, 0, 1)]
-    ]
+    modified_y_list = []
+    for org_y, max_graddif_y in tqdm(zip(org_y_list, max_graddif_y_list), desc="Step 2: Generating modified targets", total=len(org_y_list)):
+        seg_point = _get_point_via_bisection(org_y, max_graddif_y, eps, 0, 1)
+        modified_y = (1 - seg_point) * org_y + seg_point * max_graddif_y
+        modified_y_list.append(modified_y)
+    return modified_y_list
 
 class _MyLoss(nn.Module):
     """Custom loss function to measure distance to modified targets."""
@@ -96,7 +104,7 @@ class _MyLoss(nn.Module):
         super(_MyLoss, self).__init__()
 
     def forward(self, org_y_prob_list, modified_y_list):
-        sum_loss = torch.tensor(0, dtype=torch.float, requires_grad=True)
+        sum_loss = torch.tensor(0, dtype=torch.float, requires_grad=True).to(org_y_prob_list[0].device)
         for i in range(len(org_y_prob_list)):
             cur_loss = torch.norm(org_y_prob_list[i] - modified_y_list[i], p=2)
             sum_loss = sum_loss + cur_loss
@@ -110,9 +118,10 @@ def defend_local_model(
     y_train,
     num_classes=2,
     eps_setting=0.1,
-    retrain_epochs=200,
+    retrain_epochs=1,
     learning_rate=0.0003,
-    batch_size=128
+    batch_size=128,
+    device='cpu'
 ):
     """
     Applies a gradient-based defense mechanism to a local model.
@@ -126,26 +135,32 @@ def defend_local_model(
         retrain_epochs (int): Number of epochs to retrain the model on modified targets.
         learning_rate (float): Learning rate for the retraining optimizer.
         batch_size (int): Batch size for retraining.
+        device (str): The device to run the defense on ('cpu' or 'cuda').
 
     Returns:
         torch.nn.Module: The defended model.
     """
     # 1. Setup and Initialization
-    defended_model = copy.deepcopy(original_model)
+    defended_model = copy.deepcopy(original_model).to(device)
     defended_model.train()
     for param in defended_model.parameters():
         param.requires_grad = True
 
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, defended_model.parameters()), lr=learning_rate)
     
-    y_ext_list_prob = _create_ohe(num_classes)
-    y_ext_list_label = _create_label_tensors(num_classes)
+    y_ext_list_prob = _create_ohe(num_classes).to(device)
+    y_ext_list_label = _create_label_tensors(num_classes).to(device)
     
-    len_example = x_train.size(0)
+    x_train = x_train.to(device)
+    y_train = y_train.to(device)
+
+    # len_example = x_train.size(0)
+    len_example = 500  # Reduce number of examples for faster defense
+    x_train = x_train[:len_example]
+    y_train = y_train[:len_example]
     y_train_squeezed = y_train.squeeze()
 
     # 2. Find the most confusing label for each data point
-    print("Step 1: Finding most confusing labels...")
     y_ext_list = []
     
     # Get original model outputs (probabilities)
@@ -153,20 +168,18 @@ def defend_local_model(
         original_outputs = defended_model(x_train)
         org_y_list_prob = F.softmax(original_outputs, dim=1)
 
-    for i in range(len_example):
-        example_y_org_label = torch.LongTensor([y_train_squeezed[i]])
-        grad_dir_org_list = _get_grad_direction(x_train[i], defended_model, optimizer, example_y_org_label)
-        grad_dir_org = grad_dir_org_list[0] # Assuming single gradient tensor for simplicity
+    for i in tqdm(range(len_example), desc="Step 1: Finding most confusing labels"):
+        example_y_org_label = torch.LongTensor([y_train_squeezed[i]]).to(device)
+        grad_dir_org = _get_grad_direction(x_train[i], defended_model, optimizer, example_y_org_label)
 
         max_norm_square = -1
         y_star_max_label = -1
 
         for j in range(len(y_ext_list_label)):
-            if y_ext_list_label[j] == example_y_org_label:
+            if y_ext_list_label[j].item() == example_y_org_label.item():
                 continue # Skip the true label
             
-            grad_dir_ext_list = _get_grad_direction(x_train[i], defended_model, optimizer, y_ext_list_label[j])
-            grad_dir_ext = grad_dir_ext_list[0]
+            grad_dir_ext = _get_grad_direction(x_train[i], defended_model, optimizer, y_ext_list_label[j])
             
             # Normalize gradients before comparing
             norm_grad_org = grad_dir_org / torch.norm(grad_dir_org, p=2)
@@ -182,18 +195,17 @@ def defend_local_model(
         y_ext_list.append(torch.squeeze(y_ext_list_prob[y_star_max_label]))
 
     # 3. Generate modified targets using bisection search
-    print("Step 2: Generating modified targets...")
     modified_y_list = _get_modified_y_list(org_y_list_prob, y_ext_list, eps_setting)
     modified_y_tensor = torch.stack(modified_y_list).detach()
 
     # 4. Retrain the model on the modified targets
-    print(f"Step 3: Retraining model for {retrain_epochs} epochs...")
     loss_func = _MyLoss()
     torch_dataset = torch.utils.data.TensorDataset(x_train, modified_y_tensor)
     train_loader = torch.utils.data.DataLoader(torch_dataset, batch_size=batch_size, shuffle=True)
 
-    for epoch in range(retrain_epochs):
+    for epoch in tqdm(range(retrain_epochs), desc="Step 3: Retraining model"):
         for step, (batch_x, batch_y_modified) in enumerate(train_loader):
+            batch_x, batch_y_modified = batch_x.to(device), batch_y_modified.to(device)
             output = defended_model(batch_x)
             y_prob_list = F.softmax(output, dim=1)
             

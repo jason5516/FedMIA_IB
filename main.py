@@ -22,6 +22,7 @@ from experiments.base import Experiment
 from experiments.trainer_private import TrainerPrivate, TesterPrivate
 from experiments.utils import quant
 from mia_attack import lira_attack_ldh_cosine, cos_attack
+from experiments.defense_p2protect import defend_local_model
 
 class FederatedLearning(Experiment):
     """
@@ -103,7 +104,7 @@ class FederatedLearning(Experiment):
         
         self.w_t = copy.deepcopy(self.model.state_dict())
 
-        self.trainer = TrainerPrivate(self.model, self.train_set, self.device, self.dp, self.sigma,self.num_classes, self.defense,args.klam,args.up_bound,args.mix_alpha)
+        self.trainer = TrainerPrivate(self.model, self.train_set, self.device, self.dp, self.sigma,self.num_classes, self.defense,args.klam,args.up_bound,args.mix_alpha, self.grad_norm, self.sigma_sgd)
         self.tester = TesterPrivate(self.model, self.device)
 
         if "IB" in self.args.model_name:
@@ -195,7 +196,7 @@ class FederatedLearning(Experiment):
         else: 
             for i in range(self.num_users):
                 local_train_ldr = DataLoader(self.dict_users[i], batch_size = self.batch_size,
-                                                shuffle=True, num_workers=2)
+                                                shuffle=True, num_workers=0)
                 local_train_ldrs.append(local_train_ldr)
 
 
@@ -235,19 +236,46 @@ class FederatedLearning(Experiment):
                 
                 local_w, local_loss= self.trainer._local_update_noback(local_train_ldrs[idx], self.local_ep, self.lr, self.optim, args.sampling_proportion)
                 
-                if args.defense != 'none':
+                if self.args.defense == 'p2protect' and idx == 0 and (epoch+1) % 10 == 0:
+                    print(f"\nApplying P2Protect defense for client {idx}...")
+                    # 1. Get all data for the current client
+                    x_client_list, y_client_list = [], []
+                    # The dataloader is created with shuffle=True, which is fine.
+                    for data, target in local_train_ldrs[idx]:
+                        x_client_list.append(data)
+                        y_client_list.append(target)
+                    x_client = torch.cat(x_client_list, dim=0)
+                    y_client = torch.cat(y_client_list, dim=0)
+
+                    # 2. Apply defense. self.model was updated by trainer._local_update_noback
+                    defended_model = defend_local_model(
+                        original_model=self.model,
+                        x_train=x_client,
+                        y_train=y_client,
+                        num_classes=self.num_classes,
+                        eps_setting=self.args.p2protect_eps,
+                        retrain_epochs=self.args.p2protect_retrain_epochs,
+                        learning_rate=self.args.p2protect_lr,
+                        batch_size=self.args.p2protect_batch_size,
+                        device=self.device
+                    )
+                    # 3. Update local_w with the defended model's weights
+                    local_w = copy.deepcopy(defended_model.state_dict())
+                    print(f"P2Protect defense finished for client {idx}.")
+
+                elif self.args.defense in ['quant', 'sparse']:
                     model_grads = {}
                     for name, local_param in self.model.named_parameters():
-                        if args.defense == 'quant': # TODO: 量化
+                        if self.args.defense == 'quant': # TODO: 量化
                             model_grads[name]= local_w[name] - global_state_dict[name]
-                            assert args.d_scale >= 1.0
-                            model_grads[name]= quant(model_grads[name],int(args.d_scale))
-                        elif args.defense == 'sparse': # 分层稀疏化
+                            assert self.args.d_scale >= 1.0
+                            model_grads[name]= quant(model_grads[name],int(self.args.d_scale))
+                        elif self.args.defense == 'sparse': # 分层稀疏化
                             model_grads[name]= local_w[name] - global_state_dict[name]
                             # print('d_scale: ', args.d_scale)
                             if model_grads[name].numel() > 1000: # 太小的层直接略过
                                 # d_scale控制删除的比例
-                                threshold = torch.topk( torch.abs(model_grads[name]).reshape(-1), int(model_grads[name].numel() * (1 - args.d_scale))).values[-1]
+                                threshold = torch.topk( torch.abs(model_grads[name]).reshape(-1), int(model_grads[name].numel() * (1 - self.args.d_scale))).values[-1]
                                 model_grads[name]= torch.where(torch.abs(model_grads[name])<threshold, torch.zeros_like(model_grads[name]), model_grads[name])
                         # elif args.defense == 'dp': # dp
                         #     model_grads[name]= local_w[name] - global_state_dict[name]
@@ -258,9 +286,9 @@ class FederatedLearning(Experiment):
                         # elif args.defense == 'none': # 什么都不做
                         #     model_grads[name]= local_w[name] - global_state_dict[name]
 
-                        for key,value in model_grads.items():
-                            if key in local_w:
-                                local_w[key] = global_state_dict[key] + model_grads[key]
+                    for key,value in model_grads.items():
+                        if key in local_w:
+                            local_w[key] = global_state_dict[key] + model_grads[key]
                 
                 test_loss, test_kl_loss, test_ce_loss, test_acc=self.trainer.test(val_ldr)  
 
