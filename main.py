@@ -242,8 +242,8 @@ class FederatedLearning(Experiment):
                 if self.args.defense == 'FedDPA':
                     # FedDPA's local_update returns model updates, not model weights
                     global_model_copy = copy.deepcopy(self.model)
-                    local_update = self.defense_strategy.local_update(self.model, local_train_ldrs[idx], global_model_copy)
-                    local_ws.append(local_update)
+                    local_w = self.defense_strategy.local_update(self.model, local_train_ldrs[idx], global_model_copy)
+                    local_ws.append(local_w)
                     # FedDPA does not return loss, so we use a placeholder
                     local_losses.append(0.0)
                 else:
@@ -345,13 +345,19 @@ class FederatedLearning(Experiment):
                     if self.cosine_attack == True:# and idx == self.watch_train_client_id:
 
                         ## compute model grads
-                        model_grads= []
-                        for name, local_param in self.model.named_parameters():
-                            if local_param.requires_grad == True:
-                                # para_diff= local_w[name] - global_state_dict[name] # w2=w1-grad
-                                para_diff=  global_state_dict[name] - local_w[name] #0
-                                model_grads.append(para_diff.detach().cpu().flatten())
-                        model_grads=torch.cat(model_grads,-1)
+                        if self.args.defense == 'FedDPA':
+                            # In FedDPA, local_w is the update (w_local - w_global), which is a list of tensors.
+                            # The model gradient is approximated as w_global - w_local.
+                            model_grads = torch.cat([-p.detach().cpu().flatten() for p in local_w])
+                        else:
+                            # In other cases, local_w is the full model state_dict.
+                            model_grads= []
+                            for name, local_param in self.model.named_parameters():
+                                if local_param.requires_grad == True:
+                                    # para_diff= local_w[name] - global_state_dict[name] # w2=w1-grad
+                                    para_diff=  global_state_dict[name] - local_w[name] #0
+                                    model_grads.append(para_diff.detach().cpu().flatten())
+                            model_grads=torch.cat(model_grads,-1)
 
                         ## compute cosine score and grad diff score
                         if args.model_name == "ResNet18_IB_layer":
@@ -409,10 +415,13 @@ class FederatedLearning(Experiment):
 
             client_weights = []
             for i in range(self.num_users):
-                client_weight = len(DatasetSplit(self.train_set, self.dict_users[i]))/len(self.train_set)
+                if args.iid == 1:
+                    client_weight = len(DatasetSplit(self.train_set, self.dict_users[i])) / len(self.train_set)
+                else:
+                    client_weight = len(self.dict_users[i]) / len(self.train_set)
                 client_weights.append(client_weight)
             
-            self._fed_avg(local_ws, client_weights, 1)
+            self._fed_avg(local_ws, client_weights)
             self.model.load_state_dict(self.w_t)
             end = time.time()
             interval_time = end - start
@@ -475,7 +484,7 @@ class FederatedLearning(Experiment):
 
         return self.logs, interval_time, self.logs['best_test_acc'], acc_test_mean
 
-    def _fed_avg(self, local_updates, client_weights, lr_outer):
+    def _fed_avg(self, local_updates, client_weights):
         if self.args.defense == 'FedDPA':
             # When using FedDPA, local_updates contains model updates (tensors)
             updated_global_model = self.defense_strategy.aggregate_updates(

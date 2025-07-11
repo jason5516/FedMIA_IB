@@ -65,7 +65,6 @@ class DefenseStrategy:
                 normalized_fisher_value = (fisher_value - x_min) / (x_max - x_min)
             normalized_fisher_diag.append(normalized_fisher_value)
 
-        model.to('cpu')
         return normalized_fisher_diag
 
     def _custom_loss(self, outputs, labels, param_diffs, reg_type):
@@ -104,6 +103,7 @@ class DefenseStrategy:
         # 根據 Fisher Information 劃分參數
         u_loc, v_loc = [], []
         for param, fisher_value in zip(model.parameters(), fisher_diag):
+            fisher_value = fisher_value.to(param.device)
             u_param = (param * (fisher_value > fisher_threshold)).clone().detach()
             v_param = (param * (fisher_value <= fisher_threshold)).clone().detach()
             u_loc.append(u_param)
@@ -111,6 +111,7 @@ class DefenseStrategy:
 
         u_glob, v_glob = [], []
         for global_param, fisher_value in zip(global_model.parameters(), fisher_diag):
+            fisher_value = fisher_value.to(global_param.device)
             u_param = (global_param * (fisher_value > fisher_threshold)).clone().detach()
             v_param = (global_param * (fisher_value <= fisher_threshold)).clone().detach()
             u_glob.append(u_param)
@@ -122,7 +123,7 @@ class DefenseStrategy:
 
         # 階段一：訓練重要參數
         optimizer1 = optim.Adam(model.parameters(), lr=self.args.lr)
-        for _ in range(self.args.local_epoch):
+        for _ in range(self.args.local_ep):
             for data, labels in dataloader:
                 data, labels = data.to(self.device), labels.to(self.device)
                 optimizer1.zero_grad()
@@ -137,7 +138,7 @@ class DefenseStrategy:
 
         # 階段二：訓練不重要參數
         optimizer2 = optim.Adam(model.parameters(), lr=self.args.lr)
-        for _ in range(self.args.local_epoch):
+        for _ in range(self.args.local_ep):
             for data, labels in dataloader:
                 data, labels = data.to(self.device), labels.to(self.device)
                 optimizer2.zero_grad()
