@@ -18,11 +18,11 @@ ib_beta=1e-5
 save_dir=log_fedmia/noniid_ib
 # CUDA_VISIBLE_DEVICES=1
 
-for bt in 100.0
+for bt in 10.0
 do
     python main.py --seed $seed --num_users 10 --iid 0 --beta $bt --defense FedDPA\
         --dataset $dataset --model_name $model_name --epochs 40 --local_ep $local_epoch \
         --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
-        --lr_up cosine --MIA_mode 1  --gpu 1
+        --lr_up cosine --MIA_mode 1  --gpu 0
     # ./upload_to_onedrive.sh ./log_fedmia exp/
 done
