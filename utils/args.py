@@ -33,6 +33,13 @@ def parser_args():
     parser.add_argument('--p2protect_batch_size', type=int, default=128,
                         help="Batch size for P2Protect retraining")
     
+    # ========================= FedDPA defense parameters ========================
+    parser.add_argument('--lambda_1', type=float, default=0.1, help="Lambda1 for FedDPA")
+    parser.add_argument('--lambda_2', type=float, default=0.1, help="Lambda2 for FedDPA")
+    parser.add_argument('--clipping_bound', type=float, default=1.0, help="Clipping bound for FedDPA")
+    parser.add_argument('--fisher_threshold', type=float, default=0.5, help="Fisher threshold for FedDPA")
+    parser.add_argument('--noise_multiplier', type=float, default=0.1, help="Noise multiplier for FedDPA")
+
     parser.add_argument('--seed', type=int, default=42,
                         help="random seed")
     parser.add_argument('--frac', type=float, default=1,

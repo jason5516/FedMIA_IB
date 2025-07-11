@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 import torch.multiprocessing as mp
 import time
 import torch.optim as optim
+import json
 
 import torch.nn as nn
 import torch.nn.functional as F
@@ -23,6 +24,7 @@ from experiments.trainer_private import TrainerPrivate, TesterPrivate
 from experiments.utils import quant
 from mia_attack import lira_attack_ldh_cosine, cos_attack
 from experiments.defense_p2protect import defend_local_model
+from experiments.defense_FedDPA import DefenseStrategy
 
 class FederatedLearning(Experiment):
     """
@@ -110,6 +112,9 @@ class FederatedLearning(Experiment):
         if "IB" in self.args.model_name:
             self.trainer.ib = True
         
+        if self.defense == 'FedDPA':
+            self.defense_strategy = DefenseStrategy(args)
+
     def compute_C1(self, class_counts):
         class_counts = [c for c in class_counts if c > 0]
         total = sum(class_counts)
@@ -138,7 +143,7 @@ class FederatedLearning(Experiment):
         return 1 - 1 / ir
     
     def get_dynemic_beta(self, c_score):
-        ib_max = 1e-3
+        ib_max = 1e-4
         ib_min = 1e-5
         scale = ib_max - ib_min
 
@@ -234,67 +239,61 @@ class FederatedLearning(Experiment):
                     self.model.beta = self.user_ib[idx]
                     # print(f"Now training client {idx} with beta {self.model.beta}")
                 
-                local_w, local_loss= self.trainer._local_update_noback(local_train_ldrs[idx], self.local_ep, self.lr, self.optim, args.sampling_proportion)
-                
-                if self.args.defense == 'p2protect' and idx == 0 and (epoch+1) % 10 == 0:
-                    print(f"\nApplying P2Protect defense for client {idx}...")
-                    # 1. Get all data for the current client
-                    x_client_list, y_client_list = [], []
-                    # The dataloader is created with shuffle=True, which is fine.
-                    for data, target in local_train_ldrs[idx]:
-                        x_client_list.append(data)
-                        y_client_list.append(target)
-                    x_client = torch.cat(x_client_list, dim=0)
-                    y_client = torch.cat(y_client_list, dim=0)
+                if self.args.defense == 'FedDPA':
+                    # FedDPA's local_update returns model updates, not model weights
+                    global_model_copy = copy.deepcopy(self.model)
+                    local_update = self.defense_strategy.local_update(self.model, local_train_ldrs[idx], global_model_copy)
+                    local_ws.append(local_update)
+                    # FedDPA does not return loss, so we use a placeholder
+                    local_losses.append(0.0)
+                else:
+                    local_w, local_loss = self.trainer._local_update_noback(local_train_ldrs[idx], self.local_ep, self.lr, self.optim, args.sampling_proportion)
+                    
+                    if self.args.defense == 'p2protect' and idx == 0 and (epoch+1) % 10 == 0:
+                        print(f"\nApplying P2Protect defense for client {idx}...")
+                        x_client_list, y_client_list = [], []
+                        for data, target in local_train_ldrs[idx]:
+                            x_client_list.append(data)
+                            y_client_list.append(target)
+                        x_client = torch.cat(x_client_list, dim=0)
+                        y_client = torch.cat(y_client_list, dim=0)
 
-                    # 2. Apply defense. self.model was updated by trainer._local_update_noback
-                    defended_model = defend_local_model(
-                        original_model=self.model,
-                        x_train=x_client,
-                        y_train=y_client,
-                        num_classes=self.num_classes,
-                        eps_setting=self.args.p2protect_eps,
-                        retrain_epochs=self.args.p2protect_retrain_epochs,
-                        learning_rate=self.args.p2protect_lr,
-                        batch_size=self.args.p2protect_batch_size,
-                        device=self.device
-                    )
-                    # 3. Update local_w with the defended model's weights
-                    local_w = copy.deepcopy(defended_model.state_dict())
-                    print(f"P2Protect defense finished for client {idx}.")
+                        defended_model = defend_local_model(
+                            original_model=self.model,
+                            x_train=x_client,
+                            y_train=y_client,
+                            num_classes=self.num_classes,
+                            eps_setting=self.args.p2protect_eps,
+                            retrain_epochs=self.args.p2protect_retrain_epochs,
+                            learning_rate=self.args.p2protect_lr,
+                            batch_size=self.args.p2protect_batch_size,
+                            device=self.device
+                        )
+                        local_w = copy.deepcopy(defended_model.state_dict())
+                        print(f"P2Protect defense finished for client {idx}.")
 
-                elif self.args.defense in ['quant', 'sparse']:
-                    model_grads = {}
-                    for name, local_param in self.model.named_parameters():
-                        if self.args.defense == 'quant': # TODO: 量化
-                            model_grads[name]= local_w[name] - global_state_dict[name]
-                            assert self.args.d_scale >= 1.0
-                            model_grads[name]= quant(model_grads[name],int(self.args.d_scale))
-                        elif self.args.defense == 'sparse': # 分层稀疏化
-                            model_grads[name]= local_w[name] - global_state_dict[name]
-                            # print('d_scale: ', args.d_scale)
-                            if model_grads[name].numel() > 1000: # 太小的层直接略过
-                                # d_scale控制删除的比例
-                                threshold = torch.topk( torch.abs(model_grads[name]).reshape(-1), int(model_grads[name].numel() * (1 - self.args.d_scale))).values[-1]
-                                model_grads[name]= torch.where(torch.abs(model_grads[name])<threshold, torch.zeros_like(model_grads[name]), model_grads[name])
-                        # elif args.defense == 'dp': # dp
-                        #     model_grads[name]= local_w[name] - global_state_dict[name]
-                        #     noise_scale = args.d_scale * torch.norm(model_grads[name], p=2)
-                        #     noise = torch.randn_like(model_grads[name]) * noise_scale
-                        #     model_grads[name].add_(noise)
-                            
-                        # elif args.defense == 'none': # 什么都不做
-                        #     model_grads[name]= local_w[name] - global_state_dict[name]
-
-                    for key,value in model_grads.items():
-                        if key in local_w:
-                            local_w[key] = global_state_dict[key] + model_grads[key]
+                    elif self.args.defense in ['quant', 'sparse']:
+                        model_grads = {}
+                        for name, local_param in self.model.named_parameters():
+                            if self.args.defense == 'quant':
+                                model_grads[name]= local_w[name] - global_state_dict[name]
+                                assert self.args.d_scale >= 1.0
+                                model_grads[name]= quant(model_grads[name],int(self.args.d_scale))
+                            elif self.args.defense == 'sparse':
+                                model_grads[name]= local_w[name] - global_state_dict[name]
+                                if model_grads[name].numel() > 1000:
+                                    threshold = torch.topk( torch.abs(model_grads[name]).reshape(-1), int(model_grads[name].numel() * (1 - self.args.d_scale))).values[-1]
+                                    model_grads[name]= torch.where(torch.abs(model_grads[name])<threshold, torch.zeros_like(model_grads[name]), model_grads[name])
+                        
+                        for key,value in model_grads.items():
+                            if key in local_w:
+                                local_w[key] = global_state_dict[key] + model_grads[key]
+                    
+                    local_ws.append(copy.deepcopy(local_w))
+                    local_losses.append(local_loss)
                 
                 test_loss, test_kl_loss, test_ce_loss, test_acc=self.trainer.test(val_ldr)  
 
-                local_ws.append(copy.deepcopy(local_w))
-                local_losses.append(local_loss)
-                
                 if args.MIA_mode==1 and((epoch+1)%10==0 or epoch==0 or epoch in args.schedule_milestone or epoch-1 in args.schedule_milestone or epoch-2 in args.schedule_milestone)==1:
                     # Data that needs to be saved: the results of all clients for client0 and test set; client0 saves client0 data as train, and other clients as val
                     save_dict={}
@@ -476,16 +475,26 @@ class FederatedLearning(Experiment):
 
         return self.logs, interval_time, self.logs['best_test_acc'], acc_test_mean
 
-    def _fed_avg(self, local_ws, client_weights, lr_outer):
+    def _fed_avg(self, local_updates, client_weights, lr_outer):
+        if self.args.defense == 'FedDPA':
+            # When using FedDPA, local_updates contains model updates (tensors)
+            updated_global_model = self.defense_strategy.aggregate_updates(
+                global_model=copy.deepcopy(self.model),
+                client_updates=local_updates,
+                client_weights=client_weights,
+                noise_multiplier=self.args.noise_multiplier
+            )
+            self.w_t = updated_global_model.state_dict()
+        else:
+            # When not using FedDPA, local_updates contains full model weights (state_dicts)
+            w_avg = copy.deepcopy(local_updates[0])
+            for k in w_avg.keys():
+                w_avg[k] = w_avg[k] * client_weights[0]
 
-        w_avg = copy.deepcopy(local_ws[0])
-        for k in w_avg.keys():
-            w_avg[k] = w_avg[k] * client_weights[0]
+                for i in range(1, len(local_updates)):
+                    w_avg[k] += local_updates[i][k] * client_weights[i]
 
-            for i in range(1, len(local_ws)):
-                w_avg[k] += local_ws[i][k] * client_weights[i]
-
-            self.w_t[k] = w_avg[k]
+                self.w_t[k] = w_avg[k]
 
 
 def get_loss_distributions(args, idx, MIA_trainset_dir,MIA_testloader, MIA_valset_dir, model):
