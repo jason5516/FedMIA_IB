@@ -1,5 +1,5 @@
 # federated training and attack measurement calculatinging command 
-dataset=cifar100 # or [cifar100, dermnet, cifar10]
+dataset=cifar10 # or [cifar100, dermnet, cifar10]
 model_name=ResNet18 # or [ResNet18, ResNet18_IB, alexnet]
 
 opt=sgd
@@ -17,7 +17,7 @@ CUDA_VISIBLE_DEVICES=1
 #     --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
 #     --lr_up cosine --MIA_mode 1  --gpu 1
 
-python main.py --seed $seed --num_users 10 --iid 1 --defense none --dp --sigma_sgd 0.5\
+python main.py --seed $seed --num_users 10 --iid 1 --defense none --dp --sigma_sgd 0.3\
     --dataset $dataset --model_name $model_name --epochs 100 --local_ep $local_epoch \
     --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
     --lr_up cosine --MIA_mode 1  --gpu 1
