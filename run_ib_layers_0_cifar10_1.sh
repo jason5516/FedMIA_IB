@@ -8,7 +8,7 @@ seed=1
 lr=0.001
 local_epoch=1
 dynamic_ib=ir
-ib_beta=1e-5
+ib_beta=1e-4
 
 # ib_beta=0.00001
 
@@ -19,11 +19,11 @@ save_dir=log_fedmia/noniid
 
 for bt in 1.0 10.0 100.0
 do
-    python main.py --seed $seed --num_users 10 --iid 0 --beta $bt --ib_costum $ib_beta --ib_beta $ib_beta --ib_model_layer $layer --dynamic_ib $dynamic_ib\
+    python main.py --seed $seed --num_users 10 --iid 0 --beta $bt --ib_costum $ib_beta --ib_beta $ib_beta --ib_model_layer $layer \
         --dataset $dataset --model_name $model_name --epochs 40 --local_ep 4 --local_ep $local_epoch \
         --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
         --lr_up cosine --MIA_mode 1  --gpu 1
-    ./upload_to_onedrive.sh ./log_fedmia exp/
+    # ./upload_to_onedrive.sh ./log_fedmia exp/
 done
 
 
