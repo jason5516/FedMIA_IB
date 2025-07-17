@@ -193,8 +193,8 @@ def get_data(dataset, data_root, iid, num_users,data_aug, noniid_beta, save_path
         with open(save_path + '/client_distribution.json', 'w') as f:
             json.dump(client_label_distribution, f, indent=4)
     else:
-        client_datasets, train_idxs, val_idxs, client_size_map = cifar_beta(train_set, noniid_beta, num_users)
-        dict_users = {i: set(train_idxs[i]) for i in range(len(train_idxs))}
+        dict_users, train_idxs, val_idxs, client_size_map = cifar_beta(train_set, noniid_beta, num_users)
+        
 
         client_label_distribution = {
             client_id: {int(class_id): int(count) for class_id, count in class_map.items()}

@@ -200,7 +200,7 @@ class FederatedLearning(Experiment):
 
         else: 
             for i in range(self.num_users):
-                local_train_ldr = DataLoader(DatasetSplit(self.train_set, self.dict_users[i]), batch_size = self.batch_size,
+                local_train_ldr = DataLoader(self.dict_users[i], batch_size = self.batch_size,
                                                 shuffle=True, num_workers=0)
                 local_train_ldrs.append(local_train_ldr)
 
