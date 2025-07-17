@@ -192,6 +192,15 @@ def get_data(dataset, data_root, iid, num_users,data_aug, noniid_beta, save_path
         
         with open(save_path + '/client_distribution.json', 'w') as f:
             json.dump(client_label_distribution, f, indent=4)
+    elif iid == 3:
+        dict_users, train_idxs, val_idxs, client_size_map = cifar_half_iid_half_noniid(train_set, num_users, noniid_beta)
+        client_label_distribution = {
+            client_id: {int(class_id): int(count) for class_id, count in class_map.items()}
+            for client_id, class_map in client_size_map.items()
+        }
+        
+        with open(save_path + '/client_distribution.json', 'w') as f:
+            json.dump(client_label_distribution, f, indent=4)
     else:
         dict_users, train_idxs, val_idxs, client_size_map = cifar_beta(train_set, noniid_beta, num_users)
 
@@ -204,6 +213,70 @@ def get_data(dataset, data_root, iid, num_users,data_aug, noniid_beta, save_path
             json.dump(client_label_distribution, f, indent=4)
 
     return train_set, test_set, train_set_mia, test_set_mia, dict_users, train_idxs, val_idxs, client_label_distribution
+
+def cifar_half_iid_half_noniid(dataset, num_users, noniid_beta):
+    
+    num_iid_users = num_users // 2
+    num_noniid_users = num_users - num_iid_users
+
+    # Split dataset into two halves
+    total_size = len(dataset)
+    indices = list(range(total_size))
+    np.random.shuffle(indices)
+    
+    iid_indices = indices[:total_size // 2]
+    noniid_indices = indices[total_size // 2:]
+
+    iid_dataset = DatasetSplit(dataset.dataset, iid_indices)
+    noniid_dataset = DatasetSplit(dataset.dataset, noniid_indices)
+
+    # IID part
+    dict_users_iid, train_idxs_iid, val_idxs_iid = cifar_iid_MIA(iid_dataset, num_iid_users)
+
+    # Non-IID part
+    _, train_idxs_noniid, val_idxs_noniid, client_size_map_noniid = cifar_beta(noniid_dataset, noniid_beta, num_noniid_users)
+
+    dict_users = {}
+    train_idxs = []
+    val_idxs = []
+    client_size_map = {}
+
+    # Combine IID results
+    for i in range(num_iid_users):
+        # Remap iid indices back to original dataset indices
+        original_train_indices = {iid_indices[j] for j in dict_users_iid[i]}
+        dict_users[i] = original_train_indices
+        train_idxs.append(list(original_train_indices))
+        # For val_idxs in iid, we can take all other indices from the original dataset
+        val_idxs.append(list(set(range(total_size)) - original_train_indices))
+
+
+    # Combine Non-IID results
+    dict_users_noniid = {}
+    for i in range(num_noniid_users):
+        user_id = i + num_iid_users
+        # Remap non-iid indices back to original dataset indices
+        original_indices = [noniid_indices[j] for j in train_idxs_noniid[i]]
+        dict_users_noniid[user_id] = set(original_indices)
+        train_idxs.append(original_indices)
+        # For val_idxs in non-iid, we can take all other indices
+        val_idxs.append(list(set(range(total_size)) - set(original_indices)))
+
+    dict_users.update(dict_users_noniid)
+
+    # Calculate client_size_map for all clients
+    labels = np.array(dataset.dataset.targets)
+    for i in range(num_users):
+        client_indices = np.array(list(dict_users[i]))
+        client_labels = labels[client_indices]
+        class_counts = {c: 0 for c in range(len(dataset.dataset.classes))}
+        unique_labels, counts = np.unique(client_labels, return_counts=True)
+        for label, count in zip(unique_labels, counts):
+            class_counts[label] = count
+        client_size_map[i] = class_counts
+
+    return dict_users, train_idxs, val_idxs, client_size_map
+
 
 class DatasetSplit(Dataset):
     def __init__(self, dataset, idxs):
