@@ -9,33 +9,33 @@ local_epoch=1
 bt=1.0
 
 # iid experiment
-save_dir=log_fedmia/iid
-CUDA_VISIBLE_DEVICES=1
+# save_dir=log_fedmia/iid
+# CUDA_VISIBLE_DEVICES=1
 
 # python main.py --seed $seed --num_users 10 --iid 1 --defense p2protect\
 #     --dataset $dataset --model_name $model_name --epochs 100 --local_ep $local_epoch \
 #     --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
 #     --lr_up cosine --MIA_mode 1  --gpu 1
 
-python main.py --seed $seed --num_users 10 --iid 1 --defense none --dp --sigma_sgd 0.3\
-    --dataset $dataset --model_name $model_name --epochs 100 --local_ep $local_epoch \
-    --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
-    --lr_up cosine --MIA_mode 1  --gpu 1
+# python main.py --seed $seed --num_users 10 --iid 1 --defense none --dp --sigma_sgd 0.3\
+#     --dataset $dataset --model_name $model_name --epochs 100 --local_ep $local_epoch \
+#     --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
+#     --lr_up cosine --MIA_mode 1  --gpu 1
 
 # non-iid experiment
-# save_dir=log_fedmia/noniid
+save_dir=log_fedmia/noniid
 # CUDA_VISIBLE_DEVICES=1
 
-# for df in mix_up instahide quant sparse
-# do
-#     for bt in 10.0 1.0 0.1
-#     do
-#         python  main.py --seed $seed --num_users 10 --iid 0 --beta $bt --defense $df\
-#         --dataset $dataset --model_name $model_name --epochs 300 --local_ep $local_epoch \
-#         --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
-#         --lr_up cosine --MIA_mode 1  --gpu 1
-#     done
-# done
+for df in p2protect
+do
+    for bt in 1.0 10.0 100.0
+    do
+        python  main.py --seed $seed --num_users 10 --iid 0 --beta $bt --defense $df\
+        --dataset $dataset --model_name $model_name --epochs 100 --local_ep $local_epoch \
+        --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
+        --lr_up cosine --MIA_mode 1  --gpu 1
+    done
+done
 
 # -m debugpy --listen 5010 --wait-for-client
 # --ib_costum $ib_beta --ib_beta $ib_beta
