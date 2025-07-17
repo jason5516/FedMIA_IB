@@ -127,8 +127,8 @@ class FederatedLearning(Experiment):
         return 1 - norm_entropy
 
     def compute_C2(self, class_counts):
-        class_counts = [c for c in class_counts]
-        n_c = len(class_counts)
+        class_counts = [c for c in class_counts if c > 0]
+        n_c = self.num_classes
         n = sum(class_counts)
         if n_c <= 1 or n == 0:
             return 1.0
@@ -157,7 +157,7 @@ class FederatedLearning(Experiment):
             model = models.__dict__[self.args.model_name](num_classes=self.num_classes)
 
         
-        if self.args.dynamic_ib and self.iid in [0,2]:
+        if self.args.dynamic_ib and self.iid in [0,2,3]:
             c_score = []
             if self.args.dynamic_ib == "entropy":
                 for client_id, class_dist in self.disturibute.items():
@@ -168,7 +168,7 @@ class FederatedLearning(Experiment):
             elif self.args.dynamic_ib == "ir":
                 for client_id, class_dist in self.disturibute.items():
                     counts = list(class_dist.values())
-                    c2_score = self.compute_C2(self.disturibute)
+                    c2_score = self.compute_C2(counts)
                     c_score.append(c2_score) 
                 
             
@@ -200,7 +200,7 @@ class FederatedLearning(Experiment):
 
         else: 
             for i in range(self.num_users):
-                local_train_ldr = DataLoader(self.dict_users[i], batch_size = self.batch_size,
+                local_train_ldr = DataLoader(DatasetSplit(self.train_set, self.dict_users[i]), batch_size = self.batch_size,
                                                 shuffle=True, num_workers=0)
                 local_train_ldrs.append(local_train_ldr)
 

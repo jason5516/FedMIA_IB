@@ -307,7 +307,7 @@ def cifar_half_iid_half_noniid(dataset, num_users, noniid_beta):
     for i in range(num_iid_users):
         # Remap iid indices back to original dataset indices
         original_train_indices = {iid_indices[j] for j in dict_users_iid[i]}
-        dict_users[i] = original_train_indices
+        dict_users[i] = list(original_train_indices)
         train_idxs.append(list(original_train_indices))
         # For val_idxs in iid, we can take all other indices from the original dataset
         val_idxs.append(list(set(range(total_size)) - original_train_indices))
@@ -319,7 +319,7 @@ def cifar_half_iid_half_noniid(dataset, num_users, noniid_beta):
         user_id = i + num_iid_users
         # No remapping needed as cifar_beta_correct returns original indices
         original_indices = train_idxs_noniid[i]
-        dict_users_noniid[user_id] = set(original_indices)
+        dict_users_noniid[user_id] = list(original_indices)
         train_idxs.append(list(original_indices))
         # For val_idxs in non-iid, we can take all other indices
         val_idxs.append(list(set(range(total_size)) - set(original_indices)))
