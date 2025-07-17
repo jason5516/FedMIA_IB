@@ -143,8 +143,8 @@ class FederatedLearning(Experiment):
         return 1 - 1 / ir
     
     def get_dynemic_beta(self, c_score):
-        ib_max = 1e-3
-        ib_min = 1e-4
+        ib_max = 1e-2
+        ib_min = 1e-5
         scale = ib_max - ib_min
 
         return [ib_min + (scale * i) for i in c_score] 
