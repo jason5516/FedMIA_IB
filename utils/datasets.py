@@ -214,6 +214,68 @@ def get_data(dataset, data_root, iid, num_users,data_aug, noniid_beta, save_path
 
     return train_set, test_set, train_set_mia, test_set_mia, dict_users, train_idxs, val_idxs, client_label_distribution
 
+def cifar_beta_correct(dataset, beta, n_clients):
+    """
+    Corrected version of cifar_beta that respects the DatasetSplit.
+    """
+    print("The dataset is splited with non-iid param ", beta)
+    
+    # Get labels for the indices in the current dataset split
+    all_labels = np.array(dataset.dataset.targets)
+    split_labels = all_labels[dataset.idxs]
+    num_classes = len(dataset.dataset.classes)
+
+    label_distributions = []
+    for y in range(num_classes):
+        label_distributions.append(np.random.dirichlet(np.repeat(beta, n_clients)))
+
+    client_idx_map = {i: {} for i in range(n_clients)}
+    client_size_map = {i: {} for i in range(n_clients)}
+
+    # Group indices from the split by class
+    class_indices_in_split = {c: [] for c in range(num_classes)}
+    for i, idx in enumerate(dataset.idxs):
+        label = split_labels[i]
+        class_indices_in_split[label].append(idx)
+
+    for y in range(num_classes):
+        label_y_idx = np.array(class_indices_in_split[y])
+        label_y_size = len(label_y_idx)
+
+        if label_y_size == 0:
+            for i in range(n_clients):
+                client_size_map[i][y] = 0
+                client_idx_map[i][y] = []
+            continue
+
+        sample_size = (label_distributions[y] * label_y_size).astype(np.int32)
+        sample_size[n_clients - 1] += label_y_size - np.sum(sample_size)
+        for i in range(n_clients):
+            client_size_map[i][y] = sample_size[i]
+
+        np.random.shuffle(label_y_idx)
+        sample_interval = np.cumsum(sample_size)
+        for i in range(n_clients):
+            start = sample_interval[i - 1] if i > 0 else 0
+            client_idx_map[i][y] = label_y_idx[start:sample_interval[i]]
+
+    train_idxs = []
+    val_idxs = []
+    client_datasets = []
+    all_idxs = dataset.idxs # Use indices from the split for validation set calculation
+    for i in range(n_clients):
+        client_i_idx = np.concatenate(list(client_idx_map[i].values())).astype(int)
+        np.random.shuffle(client_i_idx)
+        
+        # The subset should be from the original dataset, using the correct indices
+        subset = Subset(dataset.dataset, client_i_idx)
+        client_datasets.append(subset)
+        
+        train_idxs.append(client_i_idx)
+        val_idxs.append(list(set(all_idxs) - set(client_i_idx)))
+
+    return client_datasets, train_idxs, val_idxs, client_size_map
+
 def cifar_half_iid_half_noniid(dataset, num_users, noniid_beta):
     
     num_iid_users = num_users // 2
@@ -234,7 +296,7 @@ def cifar_half_iid_half_noniid(dataset, num_users, noniid_beta):
     dict_users_iid, train_idxs_iid, val_idxs_iid = cifar_iid_MIA(iid_dataset, num_iid_users)
 
     # Non-IID part
-    _, train_idxs_noniid, val_idxs_noniid, client_size_map_noniid = cifar_beta(noniid_dataset, noniid_beta, num_noniid_users)
+    _, train_idxs_noniid, val_idxs_noniid, client_size_map_noniid = cifar_beta_correct(noniid_dataset, noniid_beta, num_noniid_users)
 
     dict_users = {}
     train_idxs = []
@@ -255,10 +317,10 @@ def cifar_half_iid_half_noniid(dataset, num_users, noniid_beta):
     dict_users_noniid = {}
     for i in range(num_noniid_users):
         user_id = i + num_iid_users
-        # Remap non-iid indices back to original dataset indices
-        original_indices = [noniid_indices[j] for j in train_idxs_noniid[i]]
+        # No remapping needed as cifar_beta_correct returns original indices
+        original_indices = train_idxs_noniid[i]
         dict_users_noniid[user_id] = set(original_indices)
-        train_idxs.append(original_indices)
+        train_idxs.append(list(original_indices))
         # For val_idxs in non-iid, we can take all other indices
         val_idxs.append(list(set(range(total_size)) - set(original_indices)))
 
@@ -268,11 +330,14 @@ def cifar_half_iid_half_noniid(dataset, num_users, noniid_beta):
     labels = np.array(dataset.dataset.targets)
     for i in range(num_users):
         client_indices = np.array(list(dict_users[i]))
-        client_labels = labels[client_indices]
-        class_counts = {c: 0 for c in range(len(dataset.dataset.classes))}
-        unique_labels, counts = np.unique(client_labels, return_counts=True)
-        for label, count in zip(unique_labels, counts):
-            class_counts[label] = count
+        if len(client_indices) == 0:
+            class_counts = {c: 0 for c in range(len(dataset.dataset.classes))}
+        else:
+            client_labels = labels[client_indices]
+            class_counts = {c: 0 for c in range(len(dataset.dataset.classes))}
+            unique_labels, counts = np.unique(client_labels, return_counts=True)
+            for label, count in zip(unique_labels, counts):
+                class_counts[label] = count
         client_size_map[i] = class_counts
 
     return dict_users, train_idxs, val_idxs, client_size_map
