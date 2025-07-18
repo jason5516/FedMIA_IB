@@ -1,5 +1,5 @@
 # federated training and attack measurement calculatinging command 
-dataset=cifar10 # or [cifar100, dermnet, cifar10]
+dataset=cifar100 # or [cifar100, dermnet, cifar10]
 model_name=ResNet18 # or [ResNet18, ResNet18_IB, alexnet]
 
 opt=sgd
@@ -23,10 +23,10 @@ bt=1.0
 #     --lr_up cosine --MIA_mode 1  --gpu 1
 
 # non-iid experiment
-save_dir=log_fedmia/noniid
+save_dir=log_fedmia/cifar100_noniid
 # CUDA_VISIBLE_DEVICES=1
 
-for df in p2protect
+for df in p2protect FedDPA none mix_up instahide
 do
     for bt in 1.0 10.0 100.0
     do
