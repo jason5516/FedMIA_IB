@@ -5,7 +5,7 @@ model_name=ResNet18 # or [ResNet18, ResNet18_IB, alexnet]
 opt=sgd
 seed=1 
 lr=0.001
-local_epoch=1
+local_epoch=4
 bt=1.0
 
 # iid experiment
@@ -31,7 +31,7 @@ do
     for bt in 1.0 10.0 100.0
     do
         python  main.py --seed $seed --num_users 10 --iid 0 --beta $bt --defense $df\
-        --dataset $dataset --model_name $model_name --epochs 100 --local_ep $local_epoch \
+        --dataset $dataset --model_name $model_name --epochs 40 --local_ep $local_epoch \
         --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
         --lr_up cosine --MIA_mode 1  --gpu 1
     done
