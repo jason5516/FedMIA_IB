@@ -11,14 +11,14 @@ bt=1.0
 # iid experiment
 save_dir=log_fedmia/iid
 # CUDA_VISIBLE_DEVICES=1
-for df in p2protect mix_up 
+for df in p2protect 
 do
     python main.py --seed $seed --num_users 10 --iid 1 --defense $df \
         --dataset $dataset --model_name $model_name --epochs 100 --local_ep $local_epoch \
         --lr $lr --batch_size 100 --optim $opt --save_dir $save_dir --log_folder_name $save_dir \
-        --lr_up cosine --MIA_mode 1  --gpu 1
+        --lr_up cosine --MIA_mode 1  --gpu 0
     
-    ./upload_to_onedrive.sh ./log_fedmia exp/
+    # ./upload_to_onedrive.sh ./log_fedmia exp/
 done
 
 # python main.py --seed $seed --num_users 10 --iid 1 --defense none --dp --sigma_sgd 0.5\

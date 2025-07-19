@@ -26,7 +26,7 @@ bt=1.0
 save_dir=log_fedmia/cifar100_noniid
 # CUDA_VISIBLE_DEVICES=1
 
-for df in FedDPA none mix_up instahide
+for df in instahide
 do
     for bt in 1.0 10.0 100.0
     do

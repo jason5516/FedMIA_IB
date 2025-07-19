@@ -187,22 +187,44 @@ class FederatedLearning(Experiment):
         val_ldr = DataLoader(self.test_set, batch_size=self.batch_size , shuffle=False, num_workers=2)
         test_ldr = DataLoader(self.test_set, batch_size=self.batch_size , shuffle=False, num_workers=2)
 
-        local_train_ldrs = []
-        if args.iid == 1:
-            for i in range(self.num_users):
-                if args.defense=='instahide':
-                    self.batch_size=len(self.dict_users[i])
-                    # print("batch_size:",self.batch_size) 5000
-                local_train_ldr = DataLoader(DatasetSplit(self.train_set, self.dict_users[i]), batch_size = self.batch_size,
-                                                shuffle=True, num_workers=2)
-                # print("len:",len(local_train_ldr)) 1
-                local_train_ldrs.append(local_train_ldr)
+        # local_train_ldrs = []
+        # if args.iid == 1:
+        #     for i in range(self.num_users):
+        #         if args.defense=='instahide':
+        #             self.batch_size=len(self.dict_users[i])
+        #             # batch_size=len(self.dict_users[i])
+        #             # print("batch_size:",self.batch_size) 5000
+        #         local_train_ldr = DataLoader(DatasetSplit(self.train_set, self.dict_users[i]), batch_size = self.batch_size,
+        #                                         shuffle=True, num_workers=2)
+        #         # print("len:",len(local_train_ldr)) 1
+        #         local_train_ldrs.append(local_train_ldr)
 
-        else: 
-            for i in range(self.num_users):
-                local_train_ldr = DataLoader(self.dict_users[i], batch_size = self.batch_size,
-                                                shuffle=True, num_workers=0)
-                local_train_ldrs.append(local_train_ldr)
+        # else: 
+        #     for i in range(self.num_users):
+        #         local_train_ldr = DataLoader(self.dict_users[i], batch_size = self.batch_size,
+        #                                         shuffle=True, num_workers=0)
+        #         local_train_ldrs.append(local_train_ldr)
+        local_train_ldrs = []
+        for i in range(self.num_users):
+            # 根據 iid 設定確定資料集和 num_workers
+            if args.iid == 1:
+                dataset = DatasetSplit(self.train_set, self.dict_users[i])
+                num_workers = 2
+            else:
+                dataset = self.dict_users[i]
+                num_workers = 0
+
+            # 確定批次大小
+            batch_size = self.batch_size
+            if self.defense == 'instahide':
+                batch_size = len(dataset)
+
+            # 建立 DataLoader
+            local_train_ldr = DataLoader(dataset, 
+                                         batch_size=batch_size,
+                                         shuffle=True, 
+                                         num_workers=num_workers)
+            local_train_ldrs.append(local_train_ldr)
 
 
         total_time=0
@@ -249,7 +271,7 @@ class FederatedLearning(Experiment):
                 else:
                     local_w, local_loss = self.trainer._local_update_noback(local_train_ldrs[idx], self.local_ep, self.lr, self.optim, args.sampling_proportion)
                     
-                    if self.args.defense == 'p2protect' and idx == 0 and (epoch+1) % 10 == 0:
+                    if self.args.defense == 'p2protect' and idx == 0 and (epoch+1) == self.epochs:
                         print(f"\nApplying P2Protect defense for client {idx}...")
                         x_client_list, y_client_list = [], []
                         for data, target in local_train_ldrs[idx]:
