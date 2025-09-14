@@ -40,6 +40,17 @@ def parser_args():
     parser.add_argument('--fisher_threshold', type=float, default=0.5, help="Fisher threshold for FedDPA")
     parser.add_argument('--noise_multiplier', type=float, default=0.1, help="Noise multiplier for FedDPA")
 
+    # ========================= FedFRADP defense parameters =======================
+    parser.add_argument('--base_epsilon', type=float, default=10.0, help="Base epsilon for FedFRADP")
+    parser.add_argument('--base_delta', type=float, default=1e-5, help="Base delta for FedFRADP")
+    parser.add_argument('--target_accuracy', type=float, default=0.6, help="Target accuracy for FedFRADP feedback")
+    parser.add_argument('--feature_dim', type=int, default=512, help="Feature dimension for EMD computation")
+    parser.add_argument('--fedfradp_clipping_bound', type=float, default=1.0, help="Clipping bound for FedFRADP server aggregation")
+    parser.add_argument('--server_noise_multiplier', type=float, default=0.1, help="Server noise multiplier for FedFRADP")
+    parser.add_argument('--heterogeneity_weight', type=float, default=0.1, help="Heterogeneity weight for adaptive DP")
+    parser.add_argument('--adjustment_rate', type=float, default=0.05, help="Adjustment rate for feedback regulation")
+    parser.add_argument('--history_window', type=int, default=5, help="History window size for feedback regulation")
+
     parser.add_argument('--seed', type=int, default=42,
                         help="random seed")
     parser.add_argument('--frac', type=float, default=1,
