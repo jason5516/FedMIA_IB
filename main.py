@@ -25,6 +25,7 @@ from experiments.utils import quant
 from mia_attack import lira_attack_ldh_cosine, cos_attack
 from experiments.defense_p2protect import defend_local_model
 from experiments.defense_FedDPA import DefenseStrategy
+from experiments.defense_fedfradp import FedFRADPDefense, create_fedfradp_defense, DEFAULT_CONFIG
 
 class FederatedLearning(Experiment):
     """
@@ -35,12 +36,21 @@ class FederatedLearning(Experiment):
         self.args = args
         self.watch_train_client_id=0
         self.watch_val_client_id=1
+        
+        # 添加特徵值記錄相關屬性
+        self.feature_hooks = {}
+        self.layer_features = {}
+        self.record_features = False
+        self.current_client_id = None
+        self.current_input_data = None
+        self.current_labels = None
 
         if "IB" in args.model_name:
             if len(args.ib_costum) < self.num_users:
                 args.ib_costum += [args.ib_beta] * (self.num_users - len(args.ib_costum))
-
             self.user_ib = args.ib_costum
+
+            # self.user_ib = [args.ib_beta] + [0] * (self.num_users - len(args.ib_costum))
 
         
         self.criterion = torch.nn.CrossEntropyLoss()
@@ -114,6 +124,200 @@ class FederatedLearning(Experiment):
         
         if self.defense == 'FedDPA':
             self.defense_strategy = DefenseStrategy(args)
+        elif self.defense == 'fedfradp':
+            # 初始化 FedFRADP 防禦策略
+            fedfradp_config = DEFAULT_CONFIG.copy()
+            # 根據 args 調整配置參數
+            fedfradp_config.update({
+                'base_epsilon': getattr(args, 'base_epsilon', DEFAULT_CONFIG['base_epsilon']),
+                'base_delta': getattr(args, 'base_delta', DEFAULT_CONFIG['base_delta']),
+                'target_accuracy': getattr(args, 'target_accuracy', DEFAULT_CONFIG['target_accuracy']),
+                'feature_dim': getattr(args, 'feature_dim', DEFAULT_CONFIG['feature_dim']),
+                'clipping_bound': getattr(args, 'fedfradp_clipping_bound', DEFAULT_CONFIG['clipping_bound']),
+                'server_noise_multiplier': getattr(args, 'server_noise_multiplier', DEFAULT_CONFIG['server_noise_multiplier']),
+                'heterogeneity_weight': getattr(args, 'heterogeneity_weight', DEFAULT_CONFIG['heterogeneity_weight']),
+                'adjustment_rate': getattr(args, 'adjustment_rate', DEFAULT_CONFIG['adjustment_rate']),
+                'history_window': getattr(args, 'history_window', DEFAULT_CONFIG['history_window'])
+            })
+            self.fedfradp_defense = create_fedfradp_defense(fedfradp_config)
+    
+    def register_feature_hooks(self, model):
+        """註冊forward hooks來捕獲每層的輸出特徵值"""
+        self.feature_hooks = {}
+        self.layer_features = {}
+        self.recorded_feature_samples = 0  # 追蹤已記錄的特徵值樣本數
+        self.max_feature_samples = 200     # 限制特徵值記錄的最大樣本數
+        
+        def create_hook(layer_name):
+            def hook_fn(module, input, output):
+                if self.record_features and self.recorded_feature_samples < self.max_feature_samples:
+                    # 將特徵值轉換為CPU並detach，避免記憶體問題
+                    if isinstance(output, tuple):
+                        # 對於IB模型，可能返回(output, kl_loss)
+                        features = output[0].detach().cpu().numpy()
+                    else:
+                        features = output.detach().cpu().numpy()
+                    
+                    # 計算可以記錄的樣本數
+                    batch_size = features.shape[0]
+                    remaining_samples = self.max_feature_samples - self.recorded_feature_samples
+                    samples_to_record = min(batch_size, remaining_samples)
+                    
+                    if samples_to_record > 0:
+                        # 只記錄前samples_to_record個樣本的特徵值
+                        features_to_record = features[:samples_to_record]
+                        
+                        if self.current_client_id not in self.layer_features:
+                            self.layer_features[self.current_client_id] = {}
+                        if layer_name not in self.layer_features[self.current_client_id]:
+                            self.layer_features[self.current_client_id][layer_name] = []
+                        
+                        self.layer_features[self.current_client_id][layer_name].append(features_to_record)
+                        
+                        # 只在第一層更新計數器，避免重複計算
+                        if layer_name == 'layer4':
+                            self.recorded_feature_samples += samples_to_record
+                        # if layer_name == list(self.feature_hooks.keys())[0] if self.feature_hooks else True:
+                        #     self.recorded_feature_samples += samples_to_record
+            return hook_fn
+        
+        # 為模型的每一層註冊hook
+        for name, module in model.named_modules():
+            if name in ['layer1', 'layer1.0.ib', 'layer1.0.bn2', 'layer1.1', 'layer1.1.ib', 'layer1.1.bn2', 'layer2', 'layer3', 'layer4']:  # 只對葉子節點註冊hook
+                # # 跳過某些不需要記錄的層
+                # if any(skip_type in str(type(module)) for skip_type in ['BatchNorm', 'Dropout', 'ReLU', 'MaxPool', 'AdaptiveAvgPool']):
+                #     continue
+                hook = module.register_forward_hook(create_hook(name))
+                self.feature_hooks[name] = hook
+    
+    def remove_feature_hooks(self):
+        """移除所有的forward hooks"""
+        for hook in self.feature_hooks.values():
+            hook.remove()
+        self.feature_hooks = {}
+    
+    def save_layer_features_and_data(self, epoch, client_id, input_data, labels):
+        """保存層特徵值、輸入資料和標籤"""
+        if not self.record_features:
+            return
+            
+        save_dict = {
+            'epoch': epoch,
+            'client_id': client_id,
+            'input_data': input_data.detach().cpu().numpy(),
+            'labels': labels.detach().cpu().numpy(),
+            'layer_features': self.layer_features.get(client_id, {})
+        }
+        
+        # 創建保存目錄
+        feature_save_dir = os.path.join(self.save_dir, 'layer_features')
+        if not os.path.exists(feature_save_dir):
+            os.makedirs(feature_save_dir)
+        
+        # 保存文件
+        filename = f'client_{client_id}_features_epoch_{epoch}.pkl'
+        filepath = os.path.join(feature_save_dir, filename)
+        torch.save(save_dict, filepath)
+        
+        print(f"已保存客戶端 {client_id} 在第 {epoch} 輪的層特徵值到: {filepath}")
+        
+        # 清空當前客戶端的特徵值記錄，釋放記憶體
+        if client_id in self.layer_features:
+            self.layer_features[client_id] = {}
+    
+    def _local_update_with_feature_recording(self, dataloader, local_ep, lr, optim_choice, sampling_proportion, epoch, client_id):
+        """帶有特徵值記錄的本地訓練函數，限制記錄200筆資料"""
+        self.model.train()
+        
+        # 設置優化器
+        if optim_choice == "sgd":
+            optimizer = optim.SGD(self.model.parameters(), lr, momentum=0.9, weight_decay=0.0005)
+        else:
+            optimizer = optim.AdamW(self.model.parameters(), lr, weight_decay=0.0005)
+        
+        # 如果使用差分隱私
+        if self.dp:
+            from opacus import PrivacyEngine
+            privacy_engine = PrivacyEngine()
+            self.model, optimizer, train_ldr = privacy_engine.make_private(
+                module=self.model,
+                optimizer=optimizer,
+                data_loader=dataloader,
+                noise_multiplier=self.sigma_sgd,
+                max_grad_norm=self.grad_norm,
+            )
+        else:
+            train_ldr = dataloader
+        
+        epoch_loss = []
+        all_input_data = []
+        all_labels = []
+        recorded_samples = 0
+        max_samples_to_record = 200  # 限制每個client記錄200筆資料
+        
+        for ep in range(local_ep):
+            loss_meter = 0
+            iteration = 0
+            
+            for batch_idx, (x, y) in enumerate(train_ldr):
+                x, y = x.to(self.device), y.to(self.device)
+                
+                # 記錄輸入資料和標籤（限制數量）
+                if self.record_features and recorded_samples < max_samples_to_record:
+                    # 計算這個batch中可以記錄的樣本數
+                    remaining_samples = max_samples_to_record - recorded_samples
+                    samples_to_record = min(x.size(0), remaining_samples)
+                    
+                    if samples_to_record > 0:
+                        # 只記錄前samples_to_record個樣本
+                        all_input_data.append(x[:samples_to_record].detach().cpu())
+                        all_labels.append(y[:samples_to_record].detach().cpu())
+                        recorded_samples += samples_to_record
+                
+                optimizer.zero_grad()
+                loss = torch.tensor(0.).to(self.device)
+                
+                # 前向傳播（這裡會觸發hooks記錄特徵值）
+                if "IB" in self.args.model_name:
+                    pred, kl_loss = self.model(x)
+                    ce_loss = F.cross_entropy(pred, y)
+                    loss = kl_loss * self.model.beta + ce_loss
+                else:
+                    pred = self.model(x)
+                    loss = F.cross_entropy(pred, y)
+                
+                loss.backward()
+                optimizer.step()
+                loss_meter += loss.item()
+                
+                iteration += 1
+                if iteration == int(sampling_proportion * len(train_ldr)):
+                    break
+            
+            loss_meter /= len(dataloader)
+            epoch_loss.append(loss_meter)
+        
+        # 保存記錄的資料和特徵值
+        if self.record_features and all_input_data and all_labels:
+            combined_input_data = torch.cat(all_input_data, dim=0)
+            combined_labels = torch.cat(all_labels, dim=0)
+            print(f"客戶端 {client_id} 記錄了 {combined_input_data.size(0)} 筆資料的特徵值")
+            self.save_layer_features_and_data(epoch + 1, client_id, combined_input_data, combined_labels)
+        
+        # 返回模型狀態字典和平均損失
+        model_state_dict = self.model.state_dict()
+        if self.dp:
+            from collections import OrderedDict
+            clean_state_dict = OrderedDict()
+            for k, v in model_state_dict.items():
+                if k.startswith('_module.'):
+                    clean_key = k[8:]  # remove '_module.'
+                else:
+                    clean_key = k
+                clean_state_dict[clean_key] = v
+            return clean_state_dict, np.mean(epoch_loss)
+        
+        return model_state_dict, np.mean(epoch_loss)
 
     def compute_C1(self, class_counts):
         class_counts = [c for c in class_counts if c > 0]
@@ -148,6 +352,7 @@ class FederatedLearning(Experiment):
         scale = ib_max - ib_min
 
         return [ib_min + (scale * i) for i in c_score] 
+        # return [ib_min + (scale * c_score[0])] + [0] * (self.num_users - 1) # only use the first client score for all clients
 
     def construct_model(self):
 
@@ -187,44 +392,44 @@ class FederatedLearning(Experiment):
         val_ldr = DataLoader(self.test_set, batch_size=self.batch_size , shuffle=False, num_workers=2)
         test_ldr = DataLoader(self.test_set, batch_size=self.batch_size , shuffle=False, num_workers=2)
 
-        # local_train_ldrs = []
-        # if args.iid == 1:
-        #     for i in range(self.num_users):
-        #         if args.defense=='instahide':
-        #             self.batch_size=len(self.dict_users[i])
-        #             # batch_size=len(self.dict_users[i])
-        #             # print("batch_size:",self.batch_size) 5000
-        #         local_train_ldr = DataLoader(DatasetSplit(self.train_set, self.dict_users[i]), batch_size = self.batch_size,
-        #                                         shuffle=True, num_workers=2)
-        #         # print("len:",len(local_train_ldr)) 1
-        #         local_train_ldrs.append(local_train_ldr)
-
-        # else: 
-        #     for i in range(self.num_users):
-        #         local_train_ldr = DataLoader(self.dict_users[i], batch_size = self.batch_size,
-        #                                         shuffle=True, num_workers=0)
-        #         local_train_ldrs.append(local_train_ldr)
         local_train_ldrs = []
-        for i in range(self.num_users):
-            # 根據 iid 設定確定資料集和 num_workers
-            if args.iid == 1:
-                dataset = DatasetSplit(self.train_set, self.dict_users[i])
-                num_workers = 2
-            else:
-                dataset = self.dict_users[i]
-                num_workers = 0
+        if args.iid == 1:
+            for i in range(self.num_users):
+                if args.defense=='instahide':
+                    self.batch_size=len(self.dict_users[i])
+                    # batch_size=len(self.dict_users[i])
+                    # print("batch_size:",self.batch_size) 5000
+                local_train_ldr = DataLoader(DatasetSplit(self.train_set, self.dict_users[i]), batch_size = self.batch_size,
+                                                shuffle=True, num_workers=2)
+                # print("len:",len(local_train_ldr)) 1
+                local_train_ldrs.append(local_train_ldr)
 
-            # 確定批次大小
-            batch_size = self.batch_size
-            if self.defense == 'instahide':
-                batch_size = len(dataset)
+        else: 
+            for i in range(self.num_users):
+                local_train_ldr = DataLoader(self.dict_users[i], batch_size = self.batch_size,
+                                                shuffle=True, num_workers=0)
+                local_train_ldrs.append(local_train_ldr)
+        # local_train_ldrs = []
+        # for i in range(self.num_users):
+        #     # 根據 iid 設定確定資料集和 num_workers
+        #     if args.iid == 1:
+        #         dataset = DatasetSplit(self.train_set, self.dict_users[i])
+        #         num_workers = 2
+        #     else:
+        #         dataset = self.dict_users[i]
+        #         num_workers = 0
 
-            # 建立 DataLoader
-            local_train_ldr = DataLoader(dataset, 
-                                         batch_size=batch_size,
-                                         shuffle=True, 
-                                         num_workers=num_workers)
-            local_train_ldrs.append(local_train_ldr)
+        #     # 確定批次大小
+        #     batch_size = self.batch_size
+        #     if self.defense == 'instahide':
+        #         batch_size = len(dataset)
+
+        #     # 建立 DataLoader
+        #     local_train_ldr = DataLoader(dataset, 
+        #                                  batch_size=batch_size,
+        #                                  shuffle=True, 
+        #                                  num_workers=num_workers)
+        #     local_train_ldrs.append(local_train_ldr)
 
 
         total_time=0
@@ -252,6 +457,13 @@ class FederatedLearning(Experiment):
             local_ws, local_losses,= [], []
 
             start = time.time()
+            
+            # 檢查是否需要記錄特徵值（每5個global round記錄一次）
+            if epoch == 0 or (epoch + 1) % 5 == 0:
+                should_record_features = True
+            else:
+                should_record_features = False
+            
             for idx in tqdm(idxs_users, desc='Epoch:%d, lr:%f' % (self.epochs, self.lr)):
 
                 self.model.load_state_dict(global_state_dict)
@@ -261,6 +473,15 @@ class FederatedLearning(Experiment):
                     self.model.beta = self.user_ib[idx]
                     # print(f"Now training client {idx} with beta {self.model.beta}")
                 
+                # 設置特徵值記錄
+                if should_record_features:
+                    self.record_features = True
+                    self.current_client_id = idx
+                    self.register_feature_hooks(self.model)
+                    print(f"開始記錄客戶端 {idx} 在第 {epoch + 1} 輪的層特徵值（限制200筆資料）")
+                else:
+                    self.record_features = False
+                
                 if self.args.defense == 'FedDPA':
                     # FedDPA's local_update returns model updates, not model weights
                     global_model_copy = copy.deepcopy(self.model)
@@ -268,10 +489,38 @@ class FederatedLearning(Experiment):
                     local_ws.append(local_w)
                     # FedDPA does not return loss, so we use a placeholder
                     local_losses.append(0.0)
-                else:
+                elif self.args.defense == 'fedfradp':
+                    # 先進行正常的本地訓練
                     local_w, local_loss = self.trainer._local_update_noback(local_train_ldrs[idx], self.local_ep, self.lr, self.optim, args.sampling_proportion)
                     
-                    if self.args.defense == 'p2protect' and idx == 0 and (epoch+1) == self.epochs:
+                    # 註冊客戶端到 FedFRADP 防禦系統（如果尚未註冊）
+                    client_id = str(idx)
+                    if client_id not in self.fedfradp_defense.emd_measure.client_distributions:
+                        self.fedfradp_defense.register_client(client_id, self.model, local_train_ldrs[idx], self.device)
+                    
+                    # 計算當前準確率用於回饋調節
+                    current_accuracy = None
+                    if hasattr(self, 'logs') and self.logs.get('val_acc') and len(self.logs['val_acc']) > 0:
+                        current_accuracy = self.logs['val_acc'][-1]
+                    
+                    # 應用 FedFRADP 防禦，但只在訓練後期應用，避免早期過度雜訊
+                    if epoch >= 5:  # 前5個epoch不應用防禦，讓模型先收斂
+                        defended_params = self.fedfradp_defense.apply_defense(
+                            client_id, local_w, current_accuracy
+                        )
+                        local_w = defended_params
+                    
+                    local_ws.append(copy.deepcopy(local_w))
+                    local_losses.append(local_loss)
+                else:
+                    # 如果需要記錄特徵值，則使用特殊的訓練函數
+                    if should_record_features:
+                        local_w, local_loss = self._local_update_with_feature_recording(local_train_ldrs[idx], self.local_ep, self.lr, self.optim, args.sampling_proportion, epoch, idx)
+                    else:
+                        local_w, local_loss = self.trainer._local_update_noback(local_train_ldrs[idx], self.local_ep, self.lr, self.optim, args.sampling_proportion)
+                    
+                    # 只有在非 FedFRADP 防禦時才應用其他防禦機制
+                    if self.args.defense == 'p2protect' and (epoch+1) == self.epochs:
                         print(f"\nApplying P2Protect defense for client {idx}...")
                         x_client_list, y_client_list = [], []
                         for data, target in local_train_ldrs[idx]:
@@ -314,7 +563,12 @@ class FederatedLearning(Experiment):
                     local_ws.append(copy.deepcopy(local_w))
                     local_losses.append(local_loss)
                 
-                test_loss, test_kl_loss, test_ce_loss, test_acc=self.trainer.test(val_ldr)  
+                # 如果記錄了特徵值，移除hooks並清理
+                if should_record_features:
+                    self.remove_feature_hooks()
+                    print(f"完成客戶端 {idx} 在第 {epoch + 1} 輪的特徵值記錄")
+                
+                test_loss, test_kl_loss, test_ce_loss, test_acc=self.trainer.test(val_ldr)
 
                 if args.MIA_mode==1 and((epoch+1)%10==0 or epoch==0 or epoch in args.schedule_milestone or epoch-1 in args.schedule_milestone or epoch-2 in args.schedule_milestone)==1:
                     # Data that needs to be saved: the results of all clients for client0 and test set; client0 saves client0 data as train, and other clients as val
@@ -435,15 +689,28 @@ class FederatedLearning(Experiment):
             else:
                 pass
 
-            client_weights = []
-            for i in range(self.num_users):
-                if args.iid == 1:
-                    client_weight = len(DatasetSplit(self.train_set, self.dict_users[i])) / len(self.train_set)
-                else:
-                    client_weight = len(self.dict_users[i]) / len(self.train_set)
-                client_weights.append(client_weight)
+            # 計算參與本輪訓練的客戶端權重
+            participating_client_weights = []
+            total_samples = 0
             
-            self._fed_avg(local_ws, client_weights)
+            # 先計算總樣本數
+            for idx in idxs_users:
+                if args.iid == 1:
+                    samples = len(DatasetSplit(self.train_set, self.dict_users[idx]))
+                else:
+                    samples = len(self.dict_users[idx])
+                total_samples += samples
+            
+            # 計算正規化權重
+            for idx in idxs_users:
+                if args.iid == 1:
+                    samples = len(DatasetSplit(self.train_set, self.dict_users[idx]))
+                else:
+                    samples = len(self.dict_users[idx])
+                client_weight = samples / total_samples
+                participating_client_weights.append(client_weight)
+            
+            self._fed_avg(local_ws, participating_client_weights)
             self.model.load_state_dict(self.w_t)
             end = time.time()
             interval_time = end - start
@@ -516,8 +783,21 @@ class FederatedLearning(Experiment):
                 noise_multiplier=self.args.noise_multiplier
             )
             self.w_t = updated_global_model.state_dict()
+        elif self.args.defense == 'fedfradp':
+            # FedFRADP 使用標準的加權平均聚合，避免雙重雜訊添加
+            # local_updates 包含已經應用客戶端防禦的完整模型權重 (state_dicts)
+            
+            # 使用標準的聯邦平均聚合，因為客戶端已經應用了防禦
+            w_avg = copy.deepcopy(local_updates[0])
+            for k in w_avg.keys():
+                w_avg[k] = w_avg[k] * client_weights[0]
+
+                for i in range(1, len(local_updates)):
+                    w_avg[k] += local_updates[i][k] * client_weights[i]
+
+                self.w_t[k] = w_avg[k]
         else:
-            # When not using FedDPA, local_updates contains full model weights (state_dicts)
+            # When not using special defense, local_updates contains full model weights (state_dicts)
             w_avg = copy.deepcopy(local_updates[0])
             for k in w_avg.keys():
                 w_avg[k] = w_avg[k] * client_weights[0]
