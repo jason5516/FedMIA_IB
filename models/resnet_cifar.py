@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .ib_layers import InformationBottleneck
+import torch.nn.init as init
 
 
 class BasicBlock(nn.Module):
@@ -203,6 +204,8 @@ class ResNetwithIB_layer(nn.Module):
         super(ResNetwithIB_layer, self).__init__()
         self.in_planes = 64
         self.kl_list = []
+        self.features = []
+        self.a_type = 'relu'
 
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3,
                                stride=1, padding=1, bias=False)
@@ -215,6 +218,33 @@ class ResNetwithIB_layer(nn.Module):
         self.layer3 = self._make_layer(block_list[2], 256, num_blocks[2], stride=2)
         self.layer4 = self._make_layer(block_list[3], 512, num_blocks[3], stride=2)
         self.linear = nn.Linear(512*block_list[3].expansion, num_classes)
+
+        # # Initialize weights
+        # for m in self.modules():
+        #     self.weight_init(m)
+
+    def weight_init(self, m):
+        if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
+            if self.a_type == 'relu':
+                init.kaiming_normal_(m.weight.data, nonlinearity=self.a_type)
+                if m.bias is not None:
+                    init.constant_(m.bias.data, 0)
+            elif self.a_type == 'leaky_relu':
+                init.kaiming_normal_(m.weight.data, nonlinearity=self.a_type)
+                if m.bias is not None:
+                    init.constant_(m.bias.data, 0)
+            elif self.a_type == 'tanh':
+                g = init.calculate_gain(self.a_type)
+                init.xavier_uniform_(m.weight.data, gain=g)
+                if m.bias is not None:
+                    init.constant_(m.bias.data, 0)
+            elif self.a_type == 'sigmoid':
+                g = init.calculate_gain(self.a_type)
+                init.xavier_uniform_(m.weight.data, gain=g)
+                if m.bias is not None:
+                    init.constant_(m.bias.data, 0)
+            else:
+                raise
 
     def _make_layer(self, block, planes, num_blocks, stride):
         strides = [stride] + [1]*(num_blocks-1)
@@ -238,14 +268,21 @@ class ResNetwithIB_layer(nn.Module):
 
     def forward(self, x):
         tot_kl = 0
+        self.features = []
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.layer1(out)
+        self.features.append(out)
         out = self.layer2(out)
+        self.features.append(out)
         out = self.layer3(out)
+        self.features.append(out)
         out = self.layer4(out)
+        self.features.append(out)
         out = F.avg_pool2d(out, out.shape[-1])
         out = out.view(out.size(0), -1)
+        self.features.append(out)
         out = self.linear(out)
+        self.features.append(out)
 
         tot_kl = self.get_kl_loss(self.kl_list)
         

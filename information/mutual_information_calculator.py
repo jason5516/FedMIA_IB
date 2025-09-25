@@ -13,22 +13,49 @@ class MutualInformationCalculator:
     支援輸入：原始資料X、標籤Y、層輸出Z、當前epoch
     """
     
-    def __init__(self, device: str = 'cuda', num_layers: int = None):
+    def __init__(self, device: str = 'cuda', num_layers: int = None, max_epochs: int = 1000):
         """
         初始化互信息計算器
         
         Args:
             device: 計算設備 ('cuda' 或 'cpu')
             num_layers: 神經網路層數（用於初始化 sigma 儲存）
+            max_epochs: 最大 epoch 數量
         """
         self.device = device
         self.softmax = nn.Softmax(dim=1)
+        self.max_epochs = max_epochs
         
         # 初始化 sigma 儲存（如果知道層數的話）
         if num_layers:
-            self.sigmas = th.zeros((num_layers + 1, 1000)).to(device)  # 假設最多 1000 個 epoch
+            # 增加1以支援 epoch 0 到 max_epochs（包含）
+            self.sigmas = th.zeros((num_layers + 1, max_epochs + 1)).to(device)
         else:
             self.sigmas = None
+    
+    def _ensure_sigmas_size(self, num_layers: int, epoch: int):
+        """
+        確保 sigmas 張量有足夠的大小
+        
+        Args:
+            num_layers: 層數
+            epoch: 當前 epoch
+        """
+        if self.sigmas is None:
+            # 如果 sigmas 不存在，創建一個
+            self.sigmas = th.zeros((num_layers + 1, max(epoch + 1, self.max_epochs + 1))).to(self.device)
+        elif epoch >= self.sigmas.shape[1]:
+            # 如果當前 epoch 超出 sigmas 張量大小，擴展它
+            new_size = max(epoch + 1, self.sigmas.shape[1] * 2)
+            old_sigmas = self.sigmas
+            self.sigmas = th.zeros((old_sigmas.shape[0], new_size)).to(self.device)
+            self.sigmas[:, :old_sigmas.shape[1]] = old_sigmas
+        elif self.sigmas.shape[0] < num_layers + 1:
+            # 如果層數超出 sigmas 張量大小，擴展第一維度
+            new_num_layers = max(num_layers + 1, self.sigmas.shape[0] * 2)
+            old_sigmas = self.sigmas
+            self.sigmas = th.zeros((new_num_layers, old_sigmas.shape[1])).to(self.device)
+            self.sigmas[:old_sigmas.shape[0], :] = old_sigmas
     
     def dist_mat(self, x: th.Tensor) -> th.Tensor:
         """
@@ -44,6 +71,10 @@ class MutualInformationCalculator:
             x = th.from_numpy(x)
         except (TypeError, AttributeError):
             x = x
+        
+        # 確保張量在正確的設備上
+        if hasattr(x, 'to'):
+            x = x.to(self.device)
         
         if len(x.size()) == 4:
             x = x.view(x.size()[0], -1)
@@ -114,30 +145,38 @@ class MutualInformationCalculator:
         """
         d = self.dist_mat(x)
         
+        # 確保距離矩陣在正確的設備上
+        if hasattr(d, 'to'):
+            d = d.to(self.device)
+        
         if sigma is None:
             # 自動選擇 sigma
             if epoch is not None and epoch > 20:
-                sigma_vals = th.linspace(0.3, 10 * d.mean(), 100).to(self.device)
+                sigma_vals = th.linspace(0.3, 10 * d.mean().item(), 100).to(self.device)
             else:
-                sigma_vals = th.linspace(0.3, 10 * d.mean(), 300).to(self.device)
+                sigma_vals = th.linspace(0.3, 10 * d.mean().item(), 300).to(self.device)
             
             L = []
             for sig in sigma_vals:
                 k_l = th.exp(-d ** 2 / (sig ** 2)) / d.size(0)
                 L.append(self.kernel_loss(k_x, k_y, k_l))
             
-            # 更新 sigma 儲存
-            if self.sigmas is not None and idx is not None and epoch is not None:
+            # 更新 sigma 儲存，添加邊界檢查
+            try:
+                # 確保 sigmas 張量有足夠的大小
+                self._ensure_sigmas_size(idx + 2, epoch)  # idx+2 因為我們需要 idx+1 的索引
+                
                 if epoch == 0:
                     self.sigmas[idx + 1, epoch] = sigma_vals[L.index(max(L))]
                 else:
                     self.sigmas[idx + 1, epoch] = 0.9 * self.sigmas[idx + 1, epoch - 1] + \
                                                     0.1 * sigma_vals[L.index(max(L))]
                 sigma = self.sigmas[idx + 1, epoch]
-            else:
+            except Exception as e:
+                print(f"警告: 無法更新 sigma 儲存 (epoch={epoch}, idx={idx}): {e}")
+                # 如果出現任何問題，直接使用當前最佳 sigma
                 sigma = sigma_vals[L.index(max(L))]
             
-        
         return th.exp(-d ** 2 / (sigma ** 2))
     
     def one_hot(self, y: th.Tensor, use_gpu: bool = True) -> th.Tensor:
@@ -156,11 +195,15 @@ class MutualInformationCalculator:
         except (TypeError, AttributeError):
             pass
         
+        # 確保張量在正確的設備上
+        if hasattr(y, 'to'):
+            y = y.to(self.device)
+        
         y_1d = y
         if use_gpu and self.device == 'cuda':
-            y_hot = th.zeros((y.size(0), th.max(y).int() + 1)).cuda()
+            y_hot = th.zeros((y.size(0), th.max(y).int() + 1)).to(self.device)
         else:
-            y_hot = th.zeros((y.size(0), th.max(y).int() + 1))
+            y_hot = th.zeros((y.size(0), th.max(y).int() + 1)).to(self.device)
         
         for i in range(y.size(0)):
             y_hot[i, y_1d[i].int()] = 1
@@ -193,18 +236,18 @@ class MutualInformationCalculator:
         
         # 準備資料：反轉層輸出順序（從輸出層到輸入層）
         data = layer_outputs.copy()
-        data.reverse()
+        # data.reverse()
         
         # 對最後一層（原本的輸出層）應用 softmax
-        data[-1] = self.softmax(data[-1])
+        # data[-1] = self.softmax(data[-1])
         
         # 插入輸入和目標
         data.insert(0, x)  # 在開頭插入原始輸入
         data.append(self.one_hot(y, use_gpu=(self.device == 'cuda')))  # 在末尾插入 one-hot 標籤
         
         # 計算核矩陣
-        k_x = self.kernel_mat(data[0], th.tensor([]), th.tensor([]), sigma=th.tensor(8.0))
-        k_y = self.kernel_mat(data[-1], th.tensor([]), th.tensor([]), sigma=th.tensor(0.1))
+        k_x = self.kernel_mat(data[0], th.tensor([]).to(self.device), th.tensor([]).to(self.device), sigma=th.tensor(8.0).to(self.device))
+        k_y = self.kernel_mat(data[-1], th.tensor([]).to(self.device), th.tensor([]).to(self.device), sigma=th.tensor(0.1).to(self.device))
         
         k_list = [k_x]
         for idx_l, val in enumerate(data[1:-1]):
@@ -212,8 +255,8 @@ class MutualInformationCalculator:
             val_reshaped = val.reshape(data[0].size(0), -1)
             k_list.append(self.kernel_mat(val_reshaped, k_x, k_y,
                                         epoch=epoch, idx=idx_l))
-            if self.sigmas is not None:
-                print(f"Layer {idx_l}, Sigma: {self.sigmas[idx_l + 1, epoch]}")
+            # if self.sigmas is not None:
+            #     print(f"Layer {idx_l}, Sigma: {self.sigmas[idx_l + 1, epoch]}")
         k_list.append(k_y)
         
         # 計算熵
@@ -274,8 +317,8 @@ def example_usage():
     """
     使用範例
     """
-    # 創建計算器
-    mi_calculator = MutualInformationCalculator(device='cuda', num_layers=3)
+    # 創建計算器，支援更大的 epoch 範圍
+    mi_calculator = MutualInformationCalculator(device='cuda', num_layers=3, max_epochs=2000)
     
     # 模擬資料
     batch_size = 128
@@ -293,12 +336,21 @@ def example_usage():
     layer_outputs = [layer1_output, layer2_output, layer3_output]
     
     # 計算互信息
-    I_XT, I_TY = mi_calculator.compute_mutual_information(x, y, layer_outputs, epoch=0)
-    
-    print(f"I(X;T): {I_XT}")
-    print(f"I(T;Y): {I_TY}")
-    
-    return I_XT, I_TY
+    try:
+        I_XT, I_TY = mi_calculator.compute_mutual_information(x, y, layer_outputs, epoch=0)
+        print(f"I(X;T): {I_XT}")
+        print(f"I(T;Y): {I_TY}")
+        
+        # 測試高 epoch
+        print("測試高 epoch...")
+        I_XT_high, I_TY_high = mi_calculator.compute_mutual_information(x, y, layer_outputs, epoch=1500)
+        print(f"高 epoch I(X;T): {I_XT_high}")
+        print(f"高 epoch I(T;Y): {I_TY_high}")
+        
+        return I_XT, I_TY
+    except Exception as e:
+        print(f"計算互信息時發生錯誤: {e}")
+        return None, None
 
 
 if __name__ == "__main__":

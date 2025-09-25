@@ -53,8 +53,7 @@ class FederatedLearning(Experiment):
         self.watch_val_client_id=1
         
         # 添加MI計算相關屬性
-        self.mi_calculator = None  # 將在construct_model後初始化
-        self.client_mi_calculators = {}  # 每個client的獨立MI計算器
+        self.mi_calculator = None  # 單一MI計算器，供所有客戶端使用
         self.feature_hooks = {}
         self.layer_features = {}
         self.record_features = False
@@ -304,29 +303,28 @@ class FederatedLearning(Experiment):
                 
                 # 計算MI
                 try:
-                    # 將模型設為eval
-                    self.model.eval()
+                    
+                    # # 將模型設為eval
+                    # self.model.eval()
 
-                    # 重新進行前向傳播(用hook抓取特徵)
-                    if "IB" in self.args.model_name:
-                        pred, kl_loss = self.model(x)
-                    else:
-                        pred = self.model(x)
+                    # # 重新進行前向傳播(用hook抓取特徵)
+                    # if "IB" in self.args.model_name:
+                    #     pred, kl_loss = self.model(x)
+                    # else:
+                    #     pred = self.model(x)
 
                     
-                    # 獲取client專屬的MI計算器
-                    client_mi_calc = self.client_mi_calculators[client_id]
-                    
+                    # 使用單一MI計算器處理所有客戶端
                     if use_hooks and self.record_features and len(self.layer_features) > 0:
                         # 使用hook方法獲取的特徵值
                         valid_layer_features = [f for f in self.layer_features if f is not None]
                         if len(valid_layer_features) > 0:
-                            I_XT, I_TY = client_mi_calc.compute_mutual_information(
+                            I_XT, I_TY = self.mi_calculator.compute_mutual_information(
                                 x, y, valid_layer_features, batch_count
                             )
                     elif hasattr(self.model, 'features') and len(self.model.features) > 0:
                         # 使用模型記錄的features（預設方法）
-                        I_XT, I_TY = client_mi_calc.compute_mutual_information(
+                        I_XT, I_TY = self.mi_calculator.compute_mutual_information(
                             x, y, self.model.features, batch_count
                         )
                     else:
@@ -445,13 +443,8 @@ class FederatedLearning(Experiment):
         #model = torch.nn.DataParallel(model)
         self.model = model.to(self.device)
         
-        # 初始化每個client的獨立MI計算器
-        self.mi_calculator = MutualInformationCalculator(device=self.device, num_layers=10)
-        self.client_mi_calculators = {}
-        for client_id in range(self.num_users):
-            self.client_mi_calculators[client_id] = MutualInformationCalculator(
-                device=self.device, num_layers=13
-            )
+        # 初始化單一MI計算器供所有客戶端使用
+        self.mi_calculator = MutualInformationCalculator(device=self.device, num_layers=13)
         
         torch.backends.cudnn.benchmark = True
         print('Total params: %.2f' % (sum(p.numel() for p in model.parameters())))
