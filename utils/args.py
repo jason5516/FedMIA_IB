@@ -94,7 +94,7 @@ def parser_args():
                         help='cosine_attack')
     
     # ============================ Model arguments ===================================
-    parser.add_argument('--model_name', type=str, default='alexnet', choices=['alexnet','ResNet18','ResNet18_IB', "ResNet18_IB_Block", "ResNet18_IB_layer"],
+    parser.add_argument('--model_name', type=str, default='alexnet', choices=['alexnet','ResNet18','ResNet18_IB', "ResNet18_IB_Block", "ResNet18_IB_layer", "VGG16"],
                         help='model architecture name')
     
     parser.add_argument("--dynamic_ib", type=str, default=None, choices=['entropy', 'ir', None], help="if use dynemic to choose beta")
