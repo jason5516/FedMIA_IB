@@ -1,7 +1,8 @@
 from .resnet_cifar import *
 from .resnet_ib import *
 from .ib_layers import *
-from .vgg import *
+# from .vgg import *
+from .VGG16 import *
 from .alexnet import *
 from .densenet import *
 from .preresnet import *
